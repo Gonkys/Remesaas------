@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0E2A2C">
+<meta name="robots" content="noindex, nofollow">
+<title>Tasa del día</title>
+<style>
+  :root{
+    --ink:#0E2A2C; --surface:#153638; --surface-2:#1B4245; --line:#2A5254;
+    --text:#F1EEE6; --text-muted:#7FA6A0; --gold:#D3A64B; --acento:#D3A64B;
+    --ok:#6FD39A; --alerta:#FF8A6B;
+    color-scheme:dark;
+  }
+  @media (prefers-color-scheme: light){
+    :root{
+      --ink:#F4F1E9; --surface:#FFFFFF; --surface-2:#EAE4D6; --line:#D9D2C0;
+      --text:#0E2A2C; --text-muted:#4C6E6A; --gold:#D3A64B; --acento:#8F6200;
+      --ok:#1E7A46; --alerta:#B3261E;
+      color-scheme:light;
+    }
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--ink); color:var(--text); min-height:100vh;
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    display:flex; justify-content:center; padding:24px 16px 60px;
+  }
+  .app{width:100%; max-width:440px;}
+  h1{font-size:17px; font-weight:600; margin:0 0 18px;}
+  .card{
+    background:var(--surface); border:1px solid var(--line); border-radius:14px;
+    padding:16px; margin-bottom:14px;
+  }
+  label{display:block; font-size:12.5px; color:var(--text-muted); margin:0 0 5px;}
+  input{
+    width:100%; background:var(--ink); border:1px solid var(--line); color:var(--text);
+    font-family:'Courier New',monospace; font-size:20px; font-weight:700;
+    padding:10px 12px; border-radius:9px; outline:none; margin-bottom:14px;
+  }
+  input[type="password"]{font-family:inherit; font-size:14px; font-weight:400;}
+  button{
+    width:100%; border:none; border-radius:10px; cursor:pointer; font-family:inherit;
+    font-size:14px; font-weight:700; padding:13px 10px; margin-top:4px;
+  }
+  button:active{transform:scale(0.99);}
+  #btnPublicar{background:var(--gold); color:#1A1204;}
+  .secundario{
+    background:transparent; border:1px solid var(--line); color:var(--text-muted);
+    font-size:13px; font-weight:600; margin-top:10px;
+  }
+  .fecha{font-size:11.5px; color:var(--text-muted); margin:0 0 14px; line-height:1.4;}
+  .fecha b{color:var(--text);}
+  .estado{font-size:12.5px; line-height:1.45; color:var(--text-muted); margin:0;}
+  .estado b{color:var(--text); font-weight:600;}
+  .estado.ok{color:var(--ok);}
+  .estado.error{color:var(--alerta); font-weight:600;}
+  .salida{
+    border:1px solid var(--line); border-radius:12px; padding:14px;
+    font-size:13px; line-height:1.5; white-space:pre-wrap;
+  }
+  .salida.ok{border-color:var(--ok);}
+  .salida.error{border-color:var(--alerta); color:var(--alerta);}
+  details summary{
+    cursor:pointer; font-size:12.5px; font-weight:600; color:var(--text-muted);
+    list-style:none;
+  }
+  details summary::-webkit-details-marker{display:none;}
+  details[open] summary{margin-bottom:12px;}
+  .ayuda{font-size:11.5px; color:var(--text-muted); line-height:1.5; margin:0 0 12px;}
+  .ayuda code{font-family:'Courier New',monospace; font-size:11px; color:var(--text);}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <h1>Tasa del día</h1>
+
+  <div class="card">
+    <p class="estado" id="estado">Mirando qué hay publicado…</p>
+  </div>
+
+  <div class="card">
+    <label for="normal">Tasa normal</label>
+    <input type="text" id="normal" inputmode="decimal" placeholder="Ej: 0,9420" autocomplete="off">
+
+    <label for="especial">Tasa especial</label>
+    <input type="text" id="especial" inputmode="decimal" placeholder="Ej: 0,9800" autocomplete="off">
+
+    <p class="fecha">Se publica con la fecha de hoy: <b id="fechaHoy"></b>.</p>
+
+    <button type="button" id="btnPublicar">Publicar tasa de hoy</button>
+    <button type="button" id="btnMensaje" class="secundario">Copiar mensaje para WhatsApp</button>
+  </div>
+
+  <div class="salida" id="salida" hidden></div>
+
+  <div class="card">
+    <details id="cajaLlave">
+      <summary>Llave de GitHub (configurar una sola vez)</summary>
+      <p class="ayuda">
+        Se pega una vez y queda guardada en este teléfono. Para crearla: GitHub → Settings →
+        Developer settings → <b>Personal access tokens → Fine-grained tokens → Generate new token</b>.
+        En "Repository access" elegí <b>Only select repositories</b> y el repositorio de las remesas.
+        En "Permissions → Repository permissions" poné <b>Contents: Read and write</b>. Copiá el
+        token (empieza con <code>github_pat_</code>).
+      </p>
+      <input type="password" id="llave" placeholder="github_pat_..." autocomplete="off">
+      <button type="button" id="btnGuardarLlave" class="secundario">Guardar llave en este teléfono</button>
+      <button type="button" id="btnBorrarLlave" class="secundario">Borrar la llave guardada</button>
+      <p class="ayuda" id="estadoLlave" style="margin-top:10px;"></p>
+    </details>
+  </div>
+</div>
+
+<script>
+// --- Datos del repositorio ---------------------------------------------------------
+const REPO = 'Gonkys/Remesaas------';
+const RAMA = 'main';
+const ARCHIVO = 'tasas.json';
+const API = 'https://api.github.com/repos/' + REPO + '/contents/' + ARCHIVO;
+const CLAVE_LLAVE = 'remesas_llave';
+
+const $ = (id) => document.getElementById(id);
+
+function dosDig(n){ return String(n).padStart(2, '0'); }
+function fechaISO(d){
+  d = d || new Date();
+  return d.getFullYear() + '-' + dosDig(d.getMonth() + 1) + '-' + dosDig(d.getDate());
+}
+function fechaLarga(iso){
+  const p = String(iso || '').split('-');
+  return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : '';
+}
+function numeroTasa(t){
+  const s = String(t || '').trim().replace(',', '.');
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+function base64Utf8(texto){
+  const bytes = new TextEncoder().encode(texto);
+  let bin = '';
+  for(const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+// Para poder mostrar los valores que vienen del archivo sin romper el HTML.
+function esc(t){
+  return String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+function guardarLlave(v){
+  try{ localStorage.setItem(CLAVE_LLAVE, v); }catch(e){ /* almacenamiento bloqueado */ }
+}
+function leerLlave(){
+  try{ return localStorage.getItem(CLAVE_LLAVE) || ''; }catch(e){ return ''; }
+}
+function cabeceras(llave){
+  const h = { 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
+  if(llave) h['Authorization'] = 'Bearer ' + llave;
+  return h;
+}
+function avisar(texto, tipo){
+  const caja = $('salida');
+  caja.hidden = false;
+  caja.className = 'salida ' + (tipo || '');
+  caja.textContent = texto;
+  caja.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+function estadoLlaveUI(){
+  const llave = leerLlave();
+  $('estadoLlave').textContent = llave
+    ? 'Hay una llave guardada en este teléfono.'
+    : 'Todavía no hay ninguna llave guardada.';
+}
+
+// --- Qué hay publicado ahora -------------------------------------------------------
+async function mirarPublicado(){
+  try{
+    const r = await fetch('tasas.json?t=' + Date.now(), { cache: 'no-store' });
+    if(!r.ok) throw new Error('respuesta ' + r.status);
+    const d = await r.json();
+    const esDeHoy = String(d.fecha) === fechaISO();
+    $('estado').className = 'estado' + (esDeHoy ? ' ok' : '');
+    $('estado').innerHTML = esDeHoy
+      ? 'Publicada: <b>' + esc(fechaLarga(d.fecha)) + '</b> · normal <b>' + esc(d.normal) + '</b> · especial <b>' + esc(d.especial) + '</b>'
+      : 'La publicada es del <b>' + (esc(fechaLarga(d.fecha)) || '—') + '</b>. <b>Falta la de hoy.</b>';
+    if(!$('normal').value) $('normal').value = String(d.normal || '');
+    if(!$('especial').value) $('especial').value = String(d.especial || '');
+  }catch(e){
+    $('estado').className = 'estado';
+    $('estado').textContent = 'No pude leer lo publicado (¿sin internet?). Igual podés publicar.';
+  }
+}
+
+// --- Publicar ----------------------------------------------------------------------
+async function publicar(){
+  const llave = leerLlave();
+  if(!llave){
+    avisar('Falta la llave de GitHub.\n\nAbrí "Llave de GitHub", pegala y guardala. Es una sola vez.', 'error');
+    $('cajaLlave').open = true;
+    return;
+  }
+  const normal = $('normal').value.trim();
+  const especial = $('especial').value.trim();
+  if(numeroTasa(normal) <= 0 || numeroTasa(especial) <= 0){
+    avisar('Escribí las dos tasas, con coma decimal (por ejemplo 0,9420).', 'error');
+    return;
+  }
+
+  const contenido = JSON.stringify({ fecha: fechaISO(), normal: normal, especial: especial }, null, 2) + '\n';
+  const boton = $('btnPublicar');
+  boton.disabled = true;
+  boton.textContent = 'Publicando…';
+
+  try{
+    // 1. Qué versión hay hoy del archivo (GitHub pide el "sha" para reemplazarlo)
+    let sha = null;
+    const lectura = await fetch(API + '?ref=' + RAMA, { headers: cabeceras(llave), cache: 'no-store' });
+    if(lectura.status === 401){
+      avisar('La llave no es válida o venció.\n\nCreá una nueva y guardala acá.', 'error');
+      return;
+    }
+    if(lectura.status === 403){
+      avisar('La llave no tiene permiso para escribir en este repositorio.\n\nRevisá que tenga "Contents: Read and write".', 'error');
+      return;
+    }
+    if(lectura.ok){
+      const datos = await lectura.json();
+      sha = datos.sha;
+    } else if(lectura.status !== 404){
+      avisar('No pude leer el archivo en GitHub (' + lectura.status + ').', 'error');
+      return;
+    }
+
+    // 2. Subir el archivo nuevo
+    const cuerpo = { message: 'Tasa del ' + fechaISO(), content: base64Utf8(contenido), branch: RAMA };
+    if(sha) cuerpo.sha = sha;
+    const subida = await fetch(API, {
+      method: 'PUT',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, cabeceras(llave)),
+      body: JSON.stringify(cuerpo),
+    });
+
+    if(subida.status === 409){
+      avisar('El archivo cambió mientras publicabas.\n\nProbá de nuevo: se actualiza solo.', 'error');
+      return;
+    }
+    if(!subida.ok){
+      let detalle = '';
+      try{ detalle = (await subida.json()).message || ''; }catch(e){}
+      avisar('GitHub rechazó la publicación (' + subida.status + ').\n' + detalle, 'error');
+      return;
+    }
+
+    avisar('Tasa publicada ✓\n\n' + fechaLarga(fechaISO()) + ' · normal ' + normal + ' · especial ' + especial +
+           '\n\nGitHub tarda hasta un minuto en ponerla en línea. Te aviso cuando esté.', 'ok');
+
+    esperarEnLinea(normal, especial);
+
+    // La app de las vendedoras usa esto; se muestra también por si hay que mandarlo.
+    $('estado').className = 'estado ok';
+    $('estado').innerHTML = 'Publicada: <b>' + esc(fechaLarga(fechaISO())) + '</b> · normal <b>' + esc(normal) + '</b> · especial <b>' + esc(especial) + '</b>';
+  }catch(e){
+    avisar('No se pudo publicar: ' + (e && e.message ? e.message : 'error de conexión') +
+           '\n\nRevisá internet y probá de nuevo.', 'error');
+  }finally{
+    boton.disabled = false;
+    boton.textContent = 'Publicar tasa de hoy';
+  }
+}
+
+// Después de publicar, GitHub tarda un poco en servirlo. Se consulta hasta que aparezca.
+async function esperarEnLinea(normal, especial){
+  for(let intento = 0; intento < 8; intento++){
+    await new Promise((listo) => setTimeout(listo, 10000));
+    try{
+      const r = await fetch('tasas.json?t=' + Date.now(), { cache: 'no-store' });
+      if(!r.ok) continue;
+      const d = await r.json();
+      if(String(d.fecha) === fechaISO() && String(d.normal) === normal && String(d.especial) === especial){
+        avisar('Tasa publicada y ya en línea ✓\n\n' + fechaLarga(d.fecha) + ' · normal ' + d.normal + ' · especial ' + d.especial +
+               '\n\nLas vendedoras la toman al abrir la app.', 'ok');
+        return;
+      }
+    }catch(e){ /* se reintenta */ }
+  }
+  avisar('Publicada en GitHub ✓\n\nTodavía no aparece en el sitio. Puede tardar unos minutos más: recargá esta página para ver.', 'ok');
+}
+
+// --- Mensaje para WhatsApp ---------------------------------------------------------
+async function copiarMensaje(){
+  const normal = $('normal').value.trim();
+  const especial = $('especial').value.trim();
+  if(numeroTasa(normal) <= 0 || numeroTasa(especial) <= 0){
+    avisar('Escribí las dos tasas para armar el mensaje.', 'error');
+    return;
+  }
+  const hoy = new Date();
+  const texto = 'TASAS ' + dosDig(hoy.getDate()) + '/' + dosDig(hoy.getMonth() + 1) +
+                ' · normal ' + normal + ' · especial ' + especial;
+  try{
+    await navigator.clipboard.writeText(texto);
+    avisar('Copiado ✓\n\n' + texto + '\n\nPegalo en WhatsApp para avisarles.', 'ok');
+  }catch(e){
+    avisar('No pude copiar solo. Este es el mensaje para copiar a mano:\n\n' + texto, '');
+  }
+}
+
+// --- Arranque ----------------------------------------------------------------------
+$('fechaHoy').textContent = fechaLarga(fechaISO());
+estadoLlaveUI();
+mirarPublicado();
+
+$('btnPublicar').addEventListener('click', publicar);
+$('btnMensaje').addEventListener('click', copiarMensaje);
+$('btnGuardarLlave').addEventListener('click', () => {
+  const valor = $('llave').value.trim();
+  if(!valor){ avisar('Pegá la llave primero.', 'error'); return; }
+  guardarLlave(valor);
+  $('llave').value = '';
+  estadoLlaveUI();
+  avisar('Llave guardada en este teléfono ✓\n\nYa podés publicar la tasa.', 'ok');
+});
+$('btnBorrarLlave').addEventListener('click', () => {
+  guardarLlave('');
+  estadoLlaveUI();
+  avisar('Llave borrada de este teléfono.', '');
+});
+
+if(typeof location === 'object' && location.protocol === 'file:'){
+  avisar('Estás abriendo esta página como archivo.\n\nPara publicar, abrila desde la dirección del sitio (la que termina en /tasa.html).', 'error');
+}
+</script>
+
+</body>
+</html>
