@@ -1,0 +1,1568 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0E2A2C">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Remesas">
+<title>Calculadora de remesas</title>
+<script>
+// El tema se decide ANTES de pintar la pantalla, para que no haya un parpadeo de color al abrir.
+// Si la vendedora ya eligió un tema, se respeta; si no, se sigue el ajuste día/noche del teléfono.
+(function(){
+  var tema;
+  try{
+    var guardado = localStorage.getItem('remesas_tema');
+    if(guardado === 'claro' || guardado === 'oscuro'){
+      tema = guardado;
+    } else {
+      tema = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'oscuro' : 'claro';
+    }
+  }catch(e){
+    tema = 'oscuro';
+  }
+  document.documentElement.setAttribute('data-tema', tema);
+})();
+</script>
+<style>
+  :root{
+    --ink:#0E2A2C;
+    --surface:#153638;
+    --surface-2:#1B4245;
+    --line:#2A5254;
+    --text:#F1EEE6;
+    --text-muted:#7FA6A0;
+    --gold:#D3A64B;          /* color del botón principal */
+    --acento-texto:#D3A64B;  /* color de los números grandes */
+    --ok:#6FD39A;            /* tasa del día cargada */
+    --alerta:#FF8A6B;        /* algo para revisar */
+    --aviso:#FFC86B;         /* falta cargar la tasa */
+    color-scheme:dark;
+  }
+  /* Tema claro (día). El dorado no se lee bien sobre blanco, así que los números grandes usan un
+     ámbar más oscuro; el botón principal sigue dorado con texto oscuro, que ahí sí se lee. */
+  :root[data-tema="claro"]{
+    --ink:#F4F1E9;
+    --surface:#FFFFFF;
+    --surface-2:#EAE4D6;
+    --line:#D9D2C0;
+    --text:#0E2A2C;
+    --text-muted:#4C6E6A;
+    --acento-texto:#8F6200;
+    --ok:#1E7A46;
+    --alerta:#B3261E;
+    --aviso:#8A5A00;
+    color-scheme:light;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--ink);
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    min-height:100vh;
+    display:flex;
+    justify-content:center;
+    padding:28px 16px 60px;
+  }
+  @media (prefers-reduced-motion: reduce){ *{transition:none !important;} }
+
+  .app{ width:100%; max-width:440px; }
+
+  h1{ font-size:17px; font-weight:600; margin:0 0 22px; }
+  h1 .version{
+    font-size:11px; font-weight:500; color:var(--text-muted);
+    font-family:'Courier New',monospace; margin-left:6px;
+  }
+
+  .tasa-card{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:14px 16px;
+    margin-bottom:22px;
+  }
+  .tasa-card label{
+    display:block; font-size:12.5px; color:var(--text-muted); margin-bottom:6px;
+  }
+  .tasa-card input{
+    width:100%; background:transparent; border:none; color:var(--acento-texto);
+    font-family:'Courier New',monospace; font-size:22px; font-weight:700; outline:none;
+  }
+  .tasa-card input::placeholder{ color:#3E6265; }
+  .tasas-grid{
+    display:grid; grid-template-columns:1fr 1fr; gap:16px;
+  }
+
+  .calc-card{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:16px;
+    padding:22px 20px 20px;
+  }
+
+  .modo-switch{
+    display:flex; gap:2px;
+    background:var(--ink); border:1px solid var(--line);
+    border-radius:9px; padding:3px; margin-bottom:20px;
+  }
+  .modo-switch button{
+    flex:1; background:transparent; border:none; color:var(--text-muted);
+    font-size:12.5px; font-weight:500; padding:9px 6px; border-radius:6px; cursor:pointer;
+  }
+  .modo-switch button.activo{ background:var(--surface-2); color:var(--text); }
+
+  .campo label{ display:block; font-size:13px; color:var(--text-muted); margin-bottom:6px; }
+  .campo .fila{
+    display:flex; align-items:baseline; gap:8px;
+    border-bottom:1px solid var(--line); padding-bottom:10px;
+  }
+  .campo .simbolo{ font-family:'Courier New',monospace; font-size:22px; color:var(--text-muted); }
+  .campo input{
+    width:100%; background:transparent; border:none; color:var(--text);
+    font-family:'Courier New',monospace; font-size:32px; font-weight:700; outline:none;
+  }
+  .campo input::placeholder{ color:#3E6265; }
+
+  .campo-nombre{ margin-bottom:18px; }
+  .campo-nombre .fila{ border-bottom:1px solid var(--line); padding-bottom:8px; }
+  .campo-nombre input{
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    font-size:16px; font-weight:600;
+  }
+
+  .datos-bancarios{
+    margin-top:22px; padding-top:18px; border-top:1px solid var(--line);
+  }
+  .titulo-seccion{
+    font-size:12.5px; color:var(--text-muted); margin:0 0 12px; font-weight:600;
+  }
+  .fila-titulo-seccion{
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .fila-titulo-seccion .titulo-seccion{ margin-bottom:0; }
+  .fila-titulo-seccion button{
+    background:transparent; border:1px solid var(--line); color:var(--text-muted);
+    font-size:11.5px; padding:5px 10px; border-radius:7px; cursor:pointer; margin-bottom:12px;
+  }
+  .fila-titulo-seccion button:active{ transform:scale(0.96); }
+  .campo-chico{ margin-bottom:12px; }
+  .campo-chico label{ display:block; font-size:12px; color:var(--text-muted); margin-bottom:4px; }
+  .campo-chico input{
+    width:100%; background:var(--ink); border:1px solid var(--line); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    font-size:14.5px; padding:9px 10px; border-radius:8px; outline:none;
+  }
+  .campo-chico input::placeholder{ color:#3E6265; }
+  .fila-doble{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .datos-bancarios textarea{
+    width:100%; background:var(--ink); border:1px solid var(--line); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    font-size:14px; line-height:1.5; padding:10px; border-radius:8px; outline:none; resize:vertical;
+  }
+  .datos-bancarios textarea::placeholder{ color:#3E6265; }
+
+  .resultado{ margin-top:20px; }
+  .resultado label{ display:block; font-size:13px; color:var(--text-muted); margin-bottom:6px; }
+  .resultado .valor{
+    font-family:'Courier New',monospace; font-size:40px; font-weight:700;
+    color:var(--acento-texto); line-height:1.15; word-break:break-all;
+  }
+
+  .acciones{ margin-top:20px; }
+  .acciones button{
+    width:100%; background:var(--gold); border:none; color:#1A1204;
+    font-size:13.5px; font-weight:700; padding:12px 10px; border-radius:10px; cursor:pointer;
+  }
+  .acciones button:active{ transform:scale(0.98); }
+
+  .toast{
+    position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+    background:var(--surface-2); border:1px solid var(--gold); color:var(--text);
+    font-size:13px; padding:10px 18px; border-radius:8px; opacity:0; pointer-events:none;
+    transition:opacity 0.25s ease;
+  }
+  .toast.mostrar{ opacity:1; }
+
+  .aviso{
+    text-align:center; font-size:11.5px; color:var(--text-muted); margin-top:18px; line-height:1.5;
+  }
+
+  .comanda-caja{ margin-top:14px; }
+  .comanda-caja label{
+    display:block; font-size:11.5px; color:var(--text-muted); margin-bottom:6px;
+  }
+  .comanda-caja textarea{
+    width:100%; background:var(--ink); border:1px solid var(--gold); color:var(--text);
+    font-family:'Courier New',monospace; font-size:14px; line-height:1.5;
+    padding:10px; border-radius:8px; resize:none; outline:none;
+  }
+
+  /* --- Encabezado con el botón de tema --- */
+  .encabezado{
+    display:flex; align-items:center; justify-content:space-between;
+    gap:10px; margin:0 0 22px;
+  }
+  .encabezado h1{ margin:0; }
+  .btn-tema{
+    background:var(--surface); border:1px solid var(--line); color:var(--text-muted);
+    font-family:inherit; font-size:11.5px; font-weight:600;
+    padding:6px 10px; border-radius:8px; cursor:pointer; white-space:nowrap;
+  }
+  .btn-tema:active{ transform:scale(0.96); }
+
+  /* --- Estado de la tasa del día --- */
+  .tasa-estado{
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    margin-top:10px; padding-top:10px; border-top:1px solid var(--line);
+    font-size:11.5px; line-height:1.35;
+  }
+  #tasaEstadoTexto{ color:var(--text-muted); }
+  .tasa-estado.ok #tasaEstadoTexto{ color:var(--ok); font-weight:600; }
+  .tasa-estado.vencida #tasaEstadoTexto{ color:var(--alerta); font-weight:700; }
+  .tasa-estado.vacia #tasaEstadoTexto{ color:var(--aviso); font-weight:600; }
+  .btn-mini{
+    background:transparent; border:1px solid var(--line); color:var(--text-muted);
+    font-family:inherit; font-size:11px; font-weight:600;
+    padding:5px 9px; border-radius:7px; cursor:pointer; white-space:nowrap;
+  }
+  .btn-mini:active{ transform:scale(0.96); }
+  .tasa-estado.vencida .btn-mini{ color:var(--alerta); border-color:var(--alerta); }
+  .tasa-pegar{ margin-top:10px; }
+  .tasa-pegar label{ display:block; font-size:11.5px; color:var(--text-muted); margin-bottom:5px; }
+  .tasa-pegar textarea{
+    width:100%; background:var(--ink); border:1px solid var(--line); color:var(--text);
+    font-family:inherit; font-size:13px; line-height:1.4; padding:9px; border-radius:8px;
+    outline:none; resize:vertical;
+  }
+  .tasa-ayuda{ margin:6px 0 0; font-size:11px; color:var(--alerta); line-height:1.35; }
+  .tasa-ayuda:empty{ display:none; }
+
+  /* --- Revisión de los datos que entendió la app --- */
+  .revision{
+    margin-top:14px; padding:12px; border:1px solid var(--line); border-radius:10px;
+    background:var(--ink);
+  }
+  .revision-cabecera{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .revision-titulo{
+    font-size:10.5px; font-weight:700; color:var(--text-muted);
+    text-transform:uppercase; letter-spacing:.04em;
+  }
+  .revision-link{
+    background:transparent; border:none; color:var(--gold); font-family:inherit;
+    font-size:11.5px; font-weight:600; padding:2px 0; cursor:pointer; text-decoration:underline;
+  }
+  .revision-resumen{ margin:8px 0 0; font-size:13px; line-height:1.45; color:var(--text); }
+  .revision-aviso{ margin:8px 0 0; font-size:11.5px; line-height:1.4; color:var(--alerta); font-weight:600; }
+  .revision-campos{ margin-top:12px; padding-top:12px; border-top:1px dashed var(--line); }
+  .revision-campos label{ display:block; font-size:11.5px; color:var(--text-muted); margin:0 0 4px; }
+  .revision-campos select,
+  .revision-campos input{
+    width:100%; background:var(--surface); border:1px solid var(--line); color:var(--text);
+    font-family:inherit; font-size:14px; padding:9px 10px; border-radius:8px; outline:none;
+    margin-bottom:10px;
+  }
+
+  /* --- Ajustes propios del tema claro --- */
+  :root[data-tema="claro"] .tasa-card,
+  :root[data-tema="claro"] .calc-card{
+    box-shadow:0 1px 3px rgba(14,42,44,0.10);
+  }
+  :root[data-tema="claro"] .tasa-card input::placeholder,
+  :root[data-tema="claro"] .campo input::placeholder,
+  :root[data-tema="claro"] .campo-chico input::placeholder,
+  :root[data-tema="claro"] .datos-bancarios textarea::placeholder{
+    color:#ADA595;
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="encabezado">
+    <h1>Calculadora de remesas <span class="version" id="etiquetaVersion"></span></h1>
+    <button type="button" id="btnTema" class="btn-tema">☀︎ Día</button>
+  </div>
+
+  <div class="tasa-card">
+    <div class="tasas-grid">
+      <div>
+        <label>Tasa normal</label>
+        <input type="text" id="tasaNormal" inputmode="decimal" placeholder="Ej: 0,9660">
+      </div>
+      <div>
+        <label>Tasa especial</label>
+        <input type="text" id="tasaEspecial" inputmode="decimal" placeholder="Ej: 0,9800">
+      </div>
+    </div>
+
+    <div class="tasa-estado" id="tasaEstado">
+      <span id="tasaEstadoTexto"></span>
+      <button type="button" id="btnCargarTasas" class="btn-mini">Cargar la de hoy</button>
+    </div>
+
+    <div class="tasa-pegar" id="tasaPegar" hidden>
+      <label for="tasaMensaje">Pegá el mensaje de tasas de hoy</label>
+      <textarea id="tasaMensaje" rows="2" placeholder="TASAS 22/10 · normal 0,9420 · especial 0,9800"></textarea>
+      <p class="tasa-ayuda" id="tasaAyuda"></p>
+    </div>
+  </div>
+
+  <div class="calc-card">
+
+    <div class="campo campo-nombre">
+      <label>Tu nombre</label>
+      <div class="fila">
+        <input type="text" id="nombreVendedor" placeholder="Escribe tu nombre">
+      </div>
+    </div>
+
+    <div class="modo-switch">
+      <button id="btnTasaNormal" class="activo">Tasa normal</button>
+      <button id="btnTasaEspecial">Tasa especial</button>
+    </div>
+
+    <div class="modo-switch">
+      <button id="btnModoClp" class="activo">Cliente da pesos</button>
+      <button id="btnModoVes">Cliente pide bolívares</button>
+    </div>
+
+    <div class="campo">
+      <label id="labelEntrada">Monto que entrega el cliente (CLP)</label>
+      <div class="fila">
+        <span class="simbolo" id="simboloEntrada">$</span>
+        <input type="text" id="monto" inputmode="decimal" placeholder="0" autofocus>
+      </div>
+    </div>
+
+    <div class="resultado">
+      <label id="labelSalida">El cliente recibe</label>
+      <div class="valor" id="valorSalida">Bs 0,00</div>
+    </div>
+
+    <div class="datos-bancarios">
+      <div class="fila-titulo-seccion">
+        <p class="titulo-seccion">Cuenta destino (Venezuela)</p>
+        <button type="button" id="btnBorrarBanco">Borrar</button>
+      </div>
+      <textarea id="bancoTexto" placeholder="Pega aquí el mensaje del cliente, tal como te lo mandó" rows="5" autocomplete="on"></textarea>
+
+      <div class="revision" id="revisionDatos" hidden>
+        <div class="revision-cabecera">
+          <span class="revision-titulo" id="revisionTitulo">Entendí esto</span>
+          <button type="button" id="btnCorregir" class="revision-link">Corregir</button>
+        </div>
+        <p class="revision-resumen" id="revisionResumen"></p>
+        <p class="revision-aviso" id="revisionAviso" hidden></p>
+        <div class="revision-campos" id="revisionCampos" hidden>
+          <div class="fila-doble">
+            <div>
+              <label for="campoTipo">Tipo</label>
+              <select id="campoTipo">
+                <option value="pago">Pago móvil</option>
+                <option value="transferencia">Transferencia</option>
+              </select>
+            </div>
+            <div>
+              <label for="campoBanco">Banco</label>
+              <select id="campoBanco"><option value="">(sin banco)</option></select>
+            </div>
+          </div>
+          <div class="fila-doble">
+            <div>
+              <label for="campoCedula">Cédula</label>
+              <input type="text" id="campoCedula" inputmode="numeric">
+            </div>
+            <div id="cajaTelefono">
+              <label for="campoTelefono">Teléfono</label>
+              <input type="text" id="campoTelefono" inputmode="numeric">
+            </div>
+          </div>
+          <div id="cajaCuenta" hidden>
+            <label for="campoCuenta">Cuenta (20 dígitos)</label>
+            <input type="text" id="campoCuenta" inputmode="numeric">
+          </div>
+          <div id="cajaNombre" hidden>
+            <label for="campoNombre">Nombre del titular</label>
+            <input type="text" id="campoNombre">
+          </div>
+          <button type="button" id="btnRestaurar" class="revision-link">Volver a lo que entendió</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="acciones">
+      <button id="btnCopiar">Generar comanda</button>
+    </div>
+
+    <div class="comanda-caja" id="comandaCaja" style="display:none;">
+      <label>Mantén presionado el texto y elige "Copiar"</label>
+      <textarea id="comandaTexto" readonly rows="5"></textarea>
+    </div>
+
+  </div>
+
+  <p class="aviso">La tasa vale solo para el día en que se carga: si es de otro día, la app la marca en rojo y no deja generar la comanda.</p>
+</div>
+
+<div class="toast" id="toast">Comanda copiada</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+// Identificación de la copia: permite saber de un vistazo qué versión tiene cada vendedora.
+const VERSION = 'v14';
+
+// --- Límites de seguridad de la tasa (los puede ajustar el dueño del negocio).
+// Un error de tipeo en la tasa cuesta dinero igual que un error en el monto: por eso, antes de
+// generar la comanda, si la tasa se ve rara la app pide confirmación explícita.
+const DESVIO_AVISO = 0.30;   // 30%: si cambió más que esto respecto a la última usada, avisa
+const TASA_MAX_SANA = 1000;  // por encima de este valor es casi seguro un error de tipeo
+const DIAS_VIGENCIA_COMPARACION = 7; // solo compara contra una tasa usada en los últimos 7 días
+
+// --- Lectura de números. Son DOS funciones distintas a propósito, porque la coma y el punto
+// significan cosas diferentes en cada campo:
+//   monto -> el punto es separador de miles ("100.000" son cien mil pesos)
+//   tasa  -> el punto es separador decimal  ("0.966" es la tasa de hoy)
+// Con una sola función, "100.000" se leía como 100 (mil veces menos) sin ningún aviso.
+function numeroMonto(valorTexto){
+  if(valorTexto === null || valorTexto === undefined) return 0;
+  // Se descarta todo lo que no sea dígito, punto o coma (espacios, "$", "Bs", letras).
+  let s = String(valorTexto).replace(/[^\d.,]/g, '');
+  if(s === '') return 0;
+  const tieneComa = s.includes(',');
+  const tienePunto = s.includes('.');
+  if(tieneComa && tienePunto){
+    // El último separador que aparece es el decimal
+    s = (s.lastIndexOf(',') > s.lastIndexOf('.'))
+      ? s.replace(/\./g, '').replace(',', '.')   // 1.234,56 -> 1234.56
+      : s.replace(/,/g, '');                     // 1,234.56 -> 1234.56
+  } else if(tieneComa){
+    s = (s.split(',').length === 2) ? s.replace(',', '.') : s.replace(/,/g, '');
+  } else if(tienePunto){
+    const puntos = (s.match(/\./g) || []).length;
+    if(puntos > 1){
+      s = s.replace(/\./g, '');                  // 1.234.567 -> 1234567
+    } else if(/^\d+\.\d{3}$/.test(s)){
+      s = s.replace('.', '');                    // 1.500 -> 1500
+    }
+  }
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+
+function numeroTasa(valorTexto){
+  if(valorTexto === null || valorTexto === undefined) return 0;
+  const s = String(valorTexto).trim().replace(/[^\d.,]/g, '').replace(',', '.');
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+
+const fmtCLP = (n) => '$' + n.toLocaleString('es-CL', {maximumFractionDigits:0});
+const fmtVES = (n) => 'Bs ' + n.toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+let modo = 'clp';
+let tipoTasa = 'normal';
+
+$('etiquetaVersion').textContent = VERSION;
+
+// --- Fechas: siempre en hora local ---------------------------------------------------
+// Ojo: toISOString() usa UTC, y en Chile a la noche "salta" al día siguiente. Por eso la fecha
+// local se arma a mano.
+function fechaISO(d){
+  d = d || new Date();
+  const dos = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + dos(d.getMonth() + 1) + '-' + dos(d.getDate());
+}
+function fechaCorta(iso){
+  const p = String(iso || '').split('-');
+  return p.length === 3 ? p[2] + '/' + p[1] : '';
+}
+const HOY_ISO = fechaISO();
+
+// --- Estado de la tasa del día -------------------------------------------------------
+// Una tasa vale solo para el día al que pertenece. Si es de otro día, se deja a la vista pero
+// marcada en rojo, y no se puede generar la comanda: así nadie usa la tasa de ayer sin darse
+// cuenta. Escribir a mano siempre vale, y queda fechado HOY.
+let tasaFecha = null;        // 'AAAA-MM-DD' del día al que pertenece la tasa cargada
+let tasaOrigen = null;       // 'pega' | 'manual'
+let tasasDeOtroDia = null;   // última carga de un día anterior, para avisar si la repiten
+const confirmadasIgual = {}; // para no preguntar dos veces lo mismo
+
+function tasaVigente(){ return tasaFecha === HOY_ISO; }
+
+// Todo acceso al almacenamiento va protegido: si el navegador lo tiene bloqueado (modo privado,
+// permisos, etc.), la app tiene que seguir funcionando igual, sin romperse.
+function guardar(clave, valor){
+  try{ localStorage.setItem(clave, valor); }catch(e){ /* almacenamiento no disponible: se ignora */ }
+}
+function leer(clave){
+  try{ return localStorage.getItem(clave); }catch(e){ return null; }
+}
+
+function guardarTasas(){
+  guardar('remesas_tasas', JSON.stringify({
+    normal: $('tasaNormal').value,
+    especial: $('tasaEspecial').value,
+    fecha: tasaFecha || HOY_ISO,
+    origen: tasaOrigen || 'manual'
+  }));
+}
+function cargarTasas(){
+  try{
+    const guardado = JSON.parse(leer('remesas_tasas') || 'null');
+    if(!guardado) return;
+    // Se muestran SIEMPRE, también las de otro día: así no parece que "se perdieron".
+    $('tasaNormal').value = guardado.normal || '';
+    $('tasaEspecial').value = guardado.especial || '';
+    tasaFecha = guardado.fecha || null;
+    tasaOrigen = guardado.origen || 'manual';
+    if(tasaFecha && tasaFecha !== HOY_ISO){
+      tasasDeOtroDia = { normal: guardado.normal || '', especial: guardado.especial || '', fecha: tasaFecha };
+    }
+  } catch(e){ /* si algo está corrupto, se ignora */ }
+}
+
+// De dónde salió la tasa publicada (si la app se abre desde una dirección web).
+let estadoPublicacion = 'local';  // 'local' | 'ok' | 'sin-publicar' | 'vieja'
+let fechaPublicada = null;
+
+function pintarEstadoTasa(){
+  const caja = $('tasaEstado');
+  const texto = $('tasaEstadoTexto');
+  const boton = $('btnCargarTasas');
+  caja.classList.remove('ok', 'vencida', 'vacia');
+  if(tasaVigente()){
+    caja.classList.add('ok');
+    const como = tasaOrigen === 'web' ? ' · publicada'
+               : (tasaOrigen === 'pega' ? ' · recibida' : ' · escrita a mano');
+    texto.textContent = 'Tasa del ' + fechaCorta(HOY_ISO) + como;
+    boton.textContent = 'Cambiar';
+  } else if(tasaFecha){
+    caja.classList.add('vencida');
+    texto.textContent = 'Tasa del ' + fechaCorta(tasaFecha) + ' — no usar';
+    boton.textContent = 'Cargar la de hoy';
+  } else if(estadoPublicacion === 'vieja'){
+    caja.classList.add('vacia');
+    texto.textContent = 'La publicada es del ' + (fechaCorta(fechaPublicada) || '—') + ': falta la de hoy';
+    boton.textContent = 'Cargar la de hoy';
+  } else if(estadoPublicacion === 'sin-publicar'){
+    caja.classList.add('vacia');
+    texto.textContent = 'Todavía no se publicó la tasa de hoy';
+    boton.textContent = 'Cargar la de hoy';
+  } else {
+    caja.classList.add('vacia');
+    texto.textContent = 'Falta cargar la tasa de hoy';
+    boton.textContent = 'Cargar la de hoy';
+  }
+}
+
+// --- Tasa publicada en la web --------------------------------------------------------
+// Si la calculadora se abre desde una dirección (y no como archivo suelto), se baja la tasa del
+// día. Si no hay internet, se usa la última que se bajó hoy; si no hay nada, queda el modo
+// manual/pegado de siempre. Nunca se queda esperando: a los 5 segundos corta.
+function puedeBajarTasa(){
+  return typeof fetch === 'function' && typeof location === 'object' && location &&
+         /^https?:$/.test(String(location.protocol));
+}
+
+function pedirTasaPublicada(){
+  if(!puedeBajarTasa()) return null;
+  let control = null;
+  if(typeof AbortController === 'function'){
+    try{ control = new AbortController(); }catch(e){ control = null; }
+  }
+  let limite = null;
+  if(control && typeof setTimeout === 'function'){
+    limite = setTimeout(() => { try{ control.abort(); }catch(e){} }, 5000);
+  }
+  const opciones = { cache: 'no-store' };
+  if(control) opciones.signal = control.signal;
+  return fetch('tasas.json?t=' + Date.now(), opciones)
+    .then(r => (r && r.ok) ? r.json() : null)
+    .catch(() => null)
+    .then(datos => {
+      if(limite && typeof clearTimeout === 'function') clearTimeout(limite);
+      return datos;
+    });
+}
+
+function aplicarTasaPublicada(datos){
+  if(!datos || typeof datos !== 'object'){
+    estadoPublicacion = 'sin-publicar';
+    pintarEstadoTasa();
+    return false;
+  }
+  const fecha = String(datos.fecha || '').trim();
+  const normal = datos.normal == null ? '' : String(datos.normal).trim();
+  const especial = datos.especial == null ? '' : String(datos.especial).trim();
+  if(numeroTasa(normal) <= 0){
+    estadoPublicacion = 'sin-publicar';
+    pintarEstadoTasa();
+    return false;
+  }
+  if(fecha !== HOY_ISO){
+    estadoPublicacion = 'vieja';
+    fechaPublicada = fecha;
+    pintarEstadoTasa();
+    return false;
+  }
+  estadoPublicacion = 'ok';
+  $('tasaNormal').value = normal;
+  $('tasaEspecial').value = especial;
+  tasaFecha = HOY_ISO;
+  tasaOrigen = 'web';
+  guardarTasas();
+  pintarEstadoTasa();
+  calcular();
+  return true;
+}
+
+function intentarTasaPublicada(){
+  const tarea = pedirTasaPublicada();
+  if(!tarea || typeof tarea.then !== 'function') return;
+  tarea.then(datos => {
+    if(datos) aplicarTasaPublicada(datos);
+    else { estadoPublicacion = 'sin-publicar'; pintarEstadoTasa(); }
+  });
+}
+
+// --- Mensaje de tasas del dueño ------------------------------------------------------
+// Ejemplo:  TASAS 22/10 · normal 0,9420 · especial 0,9800
+// Se acepta cualquier texto que traiga la fecha y una o dos tasas.
+function leerMensajeDeTasas(texto){
+  const original = String(texto || '');
+  if(!original.trim()) return { ok: false, motivo: '' };
+
+  // La fecha: 22/10, 22-10 o 22/10/2026. Se usan / y - (nunca el punto, que es el decimal
+  // de las tasas).
+  let dia = null, mes = null, anio = null;
+  const f = original.match(/(\d{1,2})\s*[\/\-]\s*(\d{1,2})(?:\s*[\/\-]\s*(\d{2,4}))?/);
+  if(f){
+    const d = parseInt(f[1], 10), m = parseInt(f[2], 10);
+    let a = f[3] ? parseInt(f[3], 10) : new Date().getFullYear();
+    if(a < 100) a += 2000;
+    if(d >= 1 && d <= 31 && m >= 1 && m <= 12){ dia = d; mes = m; anio = a; }
+  }
+
+  const porEtiqueta = (etiqueta) => {
+    const m = original.match(new RegExp(etiqueta + '[^\\d]{0,14}(\\d*[.,]\\d+)', 'i'));
+    if(!m) return null;
+    const valor = numeroTasa(m[1]);
+    return valor > 0 ? { texto: m[1], valor: valor } : null;
+  };
+  let normal = porEtiqueta('normal');
+  let especial = porEtiqueta('especial');
+
+  if(!normal || !especial){
+    // Sin etiquetas: los números con decimales, en orden, sacando primero la fecha.
+    const sinFecha = original.replace(/(\d{1,2})\s*[\/\-]\s*(\d{1,2})(?:\s*[\/\-]\s*(\d{2,4}))?/, ' ');
+    const valores = (sinFecha.match(/\d*[.,]\d+/g) || [])
+      .map(t => ({ texto: t, valor: numeroTasa(t) }))
+      .filter(v => v.valor > 0);
+    if(!normal && valores.length >= 1) normal = valores[0];
+    if(!especial && valores.length >= 2) especial = valores[1];
+  }
+
+  if(!normal && !especial) return { ok: false, motivo: 'No encontré tasas en el mensaje.' };
+
+  if(dia === null){
+    return { ok: false, motivo: 'El mensaje no trae la fecha. Pedí el mensaje del día ' +
+             '(ej: TASAS 22/10 · normal 0,9420 · especial 0,9800).' };
+  }
+
+  const hoy = new Date();
+  const dos = (n) => String(n).padStart(2, '0');
+  if(dia !== hoy.getDate() || mes !== hoy.getMonth() + 1 || anio !== hoy.getFullYear()){
+    return { ok: false, motivo: 'Ese mensaje es del ' + dos(dia) + '/' + dos(mes) +
+             '. Hoy es ' + fechaCorta(HOY_ISO) + ': usá el mensaje de hoy.' };
+  }
+
+  return { ok: true, fecha: HOY_ISO, normal: normal, especial: especial };
+}
+
+function aplicarMensajeDeTasas(texto){
+  const r = leerMensajeDeTasas(texto);
+  if(!r.ok){
+    $('tasaAyuda').textContent = r.motivo || '';
+    return false;
+  }
+  $('tasaNormal').value = r.normal ? r.normal.texto : '';
+  $('tasaEspecial').value = r.especial ? r.especial.texto : '';
+  tasaFecha = r.fecha;
+  tasaOrigen = 'pega';
+  guardarTasas();
+
+  const falta = [];
+  if(!r.normal) falta.push('normal');
+  if(!r.especial) falta.push('especial');
+  $('tasaAyuda').textContent = falta.length
+    ? 'El mensaje trae una sola tasa: la ' + falta.join(' y la ') + ' quedó vacía.'
+    : '';
+
+  $('tasaPegar').hidden = true;
+  $('tasaMensaje').value = '';
+  pintarEstadoTasa();
+  calcular();
+  return true;
+}
+
+// Escribir a mano: siempre vale, y queda fechado HOY.
+function alEscribirTasa(tipo){
+  tasaFecha = HOY_ISO;
+  tasaOrigen = 'manual';
+  guardarTasas();
+
+  // Si es exactamente la que había quedado de otro día, preguntar una sola vez.
+  const campo = tipo === 'normal' ? $('tasaNormal') : $('tasaEspecial');
+  const valor = numeroTasa(campo.value);
+  if(tasasDeOtroDia && !confirmadasIgual[tipo] && valor > 0){
+    const previo = numeroTasa(tipo === 'normal' ? tasasDeOtroDia.normal : tasasDeOtroDia.especial);
+    if(previo > 0 && Math.abs(previo - valor) < 0.0000001){
+      confirmadasIgual[tipo] = true;
+      if(!confirm('La tasa ' + tipo + ' que escribiste es igual a la del ' +
+                  fechaCorta(tasasDeOtroDia.fecha) + '.\n\n¿Seguro que hoy también es esa?')){
+        campo.value = '';
+        guardarTasas();
+      }
+    }
+  }
+  pintarEstadoTasa();
+  calcular();
+}
+
+$('btnCargarTasas').addEventListener('click', () => {
+  const caja = $('tasaPegar');
+  caja.hidden = !caja.hidden;
+  if(!caja.hidden){
+    $('tasaAyuda').textContent = '';
+    $('tasaMensaje').focus();
+  }
+});
+
+$('tasaMensaje').addEventListener('input', () => {
+  const texto = $('tasaMensaje').value;
+  if(!texto.trim()){ $('tasaAyuda').textContent = ''; return; }
+  const r = leerMensajeDeTasas(texto);
+  if(r.ok){ aplicarMensajeDeTasas(texto); }
+  else if(r.motivo){ $('tasaAyuda').textContent = r.motivo; }
+});
+
+$('tasaNormal').addEventListener('input', () => alEscribirTasa('normal'));
+$('tasaEspecial').addEventListener('input', () => alEscribirTasa('especial'));
+$('nombreVendedor').addEventListener('input', guardarNombre);
+
+cargarTasas();
+cargarNombre();
+pintarEstadoTasa();
+calcular();
+
+// Si la app está publicada, se baja la tasa del día. Si no hay internet, sigue con lo que haya.
+intentarTasaPublicada();
+
+// Al volver a la app (por ejemplo, al día siguiente), si la tasa no es de hoy se reintenta.
+if(document.addEventListener){
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState === 'visible' && !tasaVigente()) intentarTasaPublicada();
+  });
+}
+
+// El service worker permite abrir la app sin internet y, con internet, siempre toma la última
+// versión: la página se pide a la red y solo si falla se usa la copia guardada.
+if('serviceWorker' in navigator && typeof location === 'object' && /^https?:$/.test(String(location.protocol))){
+  try{ navigator.serviceWorker.register('sw.js').catch(() => {}); }catch(e){ /* sin soporte */ }
+}
+function guardarNombre(){
+  guardar('remesas_nombre', $('nombreVendedor').value);
+}
+function cargarNombre(){
+  const guardado = leer('remesas_nombre');
+  if(guardado) $('nombreVendedor').value = guardado;
+}
+
+// Última tasa realmente usada en una comanda: sirve de referencia para detectar un error de tipeo.
+function guardarUltimaTasa(tipo, tasa){
+  const ahora = new Date();
+  guardar('remesas_ultima_tasa_' + tipo, JSON.stringify({
+    tasa: tasa,
+    iso: fechaISO(ahora),
+    fecha: ahora.toLocaleDateString('es-CL')
+  }));
+}
+function leerUltimaTasa(tipo){
+  try{ return JSON.parse(leer('remesas_ultima_tasa_' + tipo) || 'null'); }catch(e){ return null; }
+}
+
+// Devuelve un texto de advertencia si la tasa parece un error, o null si parece normal.
+function revisarTasa(tasa, tipo){
+  if(!(tasa > 0)) return 'La tasa ' + tipo + ' está vacía o no es un número válido.';
+  if(tasa > TASA_MAX_SANA){
+    return 'La tasa ' + tipo + ' que escribiste (' + tasa + ') parece un error de escritura.';
+  }
+  const previa = leerUltimaTasa(tipo);
+  if(previa && previa.tasa > 0 && previa.iso){
+    const dias = (Date.now() - new Date(previa.iso + 'T00:00:00').getTime()) / 86400000;
+    if(dias <= DIAS_VIGENCIA_COMPARACION){
+      const cambio = (tasa - previa.tasa) / previa.tasa;
+      if(Math.abs(cambio) > DESVIO_AVISO){
+        const signo = cambio > 0 ? '+' : '';
+        return 'Ojo: la tasa ' + tipo + ' que escribiste (' + tasa + ') es ' + signo +
+               Math.round(cambio * 100) + '% distinta de la última que usaste (' + previa.tasa +
+               ', del ' + previa.fecha + ').';
+      }
+    }
+  }
+  return null;
+}
+
+// (los listeners de las tasas y la carga inicial están arriba, junto al modelo de la tasa)
+
+// --- Tema día / noche ---------------------------------------------------------------
+// Si la vendedora nunca eligió, la app sigue el ajuste del teléfono (y cambia sola si el
+// teléfono cambia de modo). Si usa el botón, esa elección manda y queda guardada en su celular.
+function temaDelSistema(){
+  return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'oscuro' : 'claro';
+}
+function pintarTema(tema){
+  document.documentElement.setAttribute('data-tema', tema);
+  // El botón muestra a qué se va a cambiar, no el estado actual.
+  $('btnTema').textContent = tema === 'claro' ? '☾ Noche' : '☀︎ Día';
+  // La barra del navegador y la barra de estado del teléfono acompañan al tema.
+  const meta = document.querySelector ? document.querySelector('meta[name="theme-color"]') : null;
+  if(meta) meta.setAttribute('content', tema === 'claro' ? '#F4F1E9' : '#0E2A2C');
+}
+pintarTema(document.documentElement.getAttribute('data-tema') === 'claro' ? 'claro' : 'oscuro');
+$('btnTema').addEventListener('click', () => {
+  const nuevo = document.documentElement.getAttribute('data-tema') === 'claro' ? 'oscuro' : 'claro';
+  guardar('remesas_tema', nuevo);
+  pintarTema(nuevo);
+});
+if(window.matchMedia){
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  const seguirAlSistema = () => { if(!leer('remesas_tema')) pintarTema(temaDelSistema()); };
+  if(mq.addEventListener) mq.addEventListener('change', seguirAlSistema);
+}
+
+// El navegador a veces restaura el campo "monto" solo (al volver de segundo plano),
+// sin avisarle a este script — eso dejaba el resultado desincronizado. Forzamos
+// que monto y datos bancarios arranquen siempre limpios, cada vez que se muestra la página.
+window.addEventListener('pageshow', () => {
+  $('monto').value = '';
+  $('bancoTexto').value = '';
+  actualizarRevision();
+  calcular();
+});
+
+$('btnBorrarBanco').addEventListener('click', () => {
+  $('bancoTexto').value = '';
+  actualizarRevision();
+  $('bancoTexto').focus();
+});
+
+$('btnTasaNormal').addEventListener('click', () => {
+  tipoTasa = 'normal';
+  $('btnTasaNormal').classList.add('activo');
+  $('btnTasaEspecial').classList.remove('activo');
+  calcular();
+});
+$('btnTasaEspecial').addEventListener('click', () => {
+  tipoTasa = 'especial';
+  $('btnTasaEspecial').classList.add('activo');
+  $('btnTasaNormal').classList.remove('activo');
+  calcular();
+});
+
+function tasaElegida(){
+  if(!tasaVigente()) return 0;
+  return numeroTasa(tipoTasa === 'normal' ? $('tasaNormal').value : $('tasaEspecial').value);
+}
+
+// Códigos de bancos de Venezuela.
+// VERIFICADO contra el listado oficial del BCV "Instituciones Bancarias Participantes (IBP)
+// activas en el SCCE" (2025): son 28 códigos, y 27 de ellos son bancos que pueden recibir una
+// remesa (el 0001 es el Banco Central de Venezuela, que no se usa para esto).
+// El 0116 (Banco Occidental de Descuento) NO figura entre los activos: ese banco fue absorbido,
+// por eso no está en la lista. Si aparece una cuenta 0116, la comanda avisa para revisarla.
+const BANCOS_VE = {
+  '0102':'Banco de Venezuela', '0104':'Banco Venezolano de Crédito', '0105':'Banco Mercantil',
+  '0108':'Banco Provincial', '0114':'Banco del Caribe', '0115':'Banco Exterior', '0128':'Banco Caroní',
+  '0134':'Banesco', '0137':'Banco Sofitasa', '0138':'Banco Plaza', '0146':'Banco de la Gente Emprendedora',
+  '0151':'Banco Fondo Común', '0156':'100% Banco', '0157':'DelSur',
+  '0163':'Banco del Tesoro', '0166':'Banco Agrícola de Venezuela', '0168':'Bancrecer',
+  '0169':'R4', '0171':'Banco Activo', '0172':'Bancamiga', '0173':'Banco Internacional de Desarrollo',
+  '0174':'Banplus', '0175':'Banco Digital de los Trabajadores', '0177':'BANFANB',
+  '0178':'N58 Banco Digital', '0191':'Banco Nacional de Crédito (BNC)',
+  '0601':'Instituto Municipal de Crédito Popular'
+};
+
+// Palabras que suelen aparecer si el cliente escribe el NOMBRE del banco en vez del código.
+// Incluye apodos comunes (ej. "bangente", "mi banco") por si el cliente usa el nombre viejo.
+// Ojo: los bancos cuyo nombre lleva números pegados (R4, N58, 100%) se reconocen por su código;
+// si el cliente escribe solo ese nombre, el banco queda vacío, se avisa en pantalla y el mensaje
+// original se agrega al final de la comanda: no se pierde nada.
+const BANCOS_KEYWORDS = {
+  '0102': ['venezuela','bdv','vnz','vzla','venez'], '0104': ['venezolano de credito','bvc','venezolano'], '0105': ['mercantil'],
+  '0108': ['provincial','bbva'], '0114': ['caribe','bancaribe'], '0115': ['exterior'],
+  '0128': ['caroni'], '0134': ['banesco'], '0137': ['sofitasa'], '0138': ['plaza'],
+  '0146': ['gente emprendedora','bangente'], '0151': ['fondo comun','bfc'],
+  '0156': ['cien','cien por ciento'], '0157': ['delsur','del sur'], '0163': ['tesoro'],
+  '0166': ['agricola'], '0168': ['bancrecer'], '0169': ['r4','mi banco'],
+  '0171': ['activo'], '0172': ['bancamiga'], '0173': ['internacional de desarrollo','bid'],
+  '0174': ['banplus'], '0175': ['digital de los trabajadores','bicentenario'],
+  '0177': ['banfanb','fanb','fuerza armada'], '0178': ['n58'],
+  '0191': ['nacional de credito','bnc'], '0601': ['credito popular','municipal']
+};
+
+function normalizar(s){
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+}
+// --- Cómo se lee el mensaje del cliente ---------------------------------------------
+// Los clientes cortan los números como quieren ("0424 513 3014") y pegan varios datos en una
+// misma línea. Por eso NO se mira cada pedazo suelto: se parte el mensaje en números, palabras y
+// separadores; los números de una misma línea se vuelven a unir (un salto de línea sí separa
+// datos distintos, un espacio no); y recién ahí se busca cada dato por su forma real, validando
+// el banco contra la lista de códigos conocidos. Lo que no se pueda ubicar queda como sobrante y
+// se avisa: nunca se descarta en silencio.
+
+// Palabras que son etiquetas del propio mensaje, no datos.
+const PALABRAS_ETIQUETA = new Set([
+  'pago','movil','transferencia','transf','cuenta','cta','ci','cl','cedula','titular','nombre',
+  'telefono','tel','tlf','cel','hola','buenas','nro','numero','num','v','e','j'
+]);
+
+const PREFIJOS_CEDULA = new Set(['v','e','j','ci','cl','ced','cedula']);
+
+// Palabras de cortesía o relleno. No se borran del mensaje, pero no cuentan como "dato sin
+// ubicar": no vale la pena agregar el mensaje original solo porque el cliente saludó.
+const PALABRAS_RELLENO = new Set([
+  'hola','buenas','buenos','buen','dias','tardes','noches','gracias','favor','por','te','me',
+  'mando','envio','envia','enviar','los','las','un','una','unos','unas','datos','dato','saludos',
+  'cordialmente','atentamente','atte','aca','aqui','amigo','amiga','senor','senora','sr','sra',
+  'estimado','estimada','disculpa','disculpe','puedes','pueda','pasame','pasa','recibe',
+  'listo','lista','dale','okey','oka','perfecto','excelente','genial','abrazos','cuidate',
+  'bendiciones','sale','entonces','ahi'
+]);
+
+function esRelleno(palabra){
+  const w = normalizar(palabra);
+  return PALABRAS_ETIQUETA.has(w) || PALABRAS_RELLENO.has(w);
+}
+
+// Saca el relleno de los BORDES de una lista de palabras, sin tocar el medio: así
+// "Hola, te mando los datos Ender Montoya, gracias" queda "Ender Montoya", pero
+// "Maria de los Angeles" no pierde nada.
+function limpiarBordes(palabras){
+  let desde = 0, hasta = palabras.length;
+  while(desde < hasta && esRelleno(palabras[desde])) desde++;
+  while(hasta > desde && esRelleno(palabras[hasta-1])) hasta--;
+  return palabras.slice(desde, hasta);
+}
+
+// Piezas: números (con sus puntos y guiones internos), palabras y separadores.
+const RE_PIEZAS = /(\d[\d.\-]*\d|\d)|([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)|([^0-9A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)/g;
+
+function analizarMensaje(textoPegado){
+  const piezas = [];
+  RE_PIEZAS.lastIndex = 0;
+  let m;
+  while((m = RE_PIEZAS.exec(textoPegado)) !== null){
+    piezas.push({
+      tipo: m[1] ? 'num' : (m[2] ? 'palabra' : 'separador'),
+      texto: m[0],
+      desde: m.index,
+      hasta: m.index + m[0].length
+    });
+  }
+
+  // Grupos numéricos: números seguidos separados solo por espacios, puntos o guiones.
+  // Un salto de línea o una palabra cortan el grupo (son datos distintos).
+  const grupos = [];
+  let grupo = null;
+  let separador = null;
+  for(let i = 0; i < piezas.length; i++){
+    const p = piezas[i];
+    if(p.tipo === 'num'){
+      const seUne = grupo && separador !== null && !/[\r\n]/.test(separador);
+      if(!seUne){
+        grupo = { digitos: '', fragmentos: [] };
+        grupos.push(grupo);
+      }
+      const soloDigitos = p.texto.replace(/[^\d]/g, '');
+      grupo.fragmentos.push({ desde: grupo.digitos.length, largo: soloDigitos.length, piezaIdx: i });
+      grupo.digitos += soloDigitos;
+      separador = null;
+    } else if(p.tipo === 'separador'){
+      separador = p.texto;
+    } else {
+      separador = null;
+      grupo = null;
+    }
+  }
+  for(const g of grupos) g.usado = new Array(g.digitos.length).fill(false);
+
+  return { piezas: piezas, grupos: grupos };
+}
+
+function ventanaLibre(grupo, desde, largo){
+  if(desde < 0 || largo <= 0 || desde + largo > grupo.digitos.length) return false;
+  for(let i = desde; i < desde + largo; i++) if(grupo.usado[i]) return false;
+  return true;
+}
+function marcarUsado(grupo, desde, largo){
+  for(let i = desde; i < desde + largo; i++) grupo.usado[i] = true;
+}
+function esBordeDeFragmento(grupo, offset){
+  return grupo.fragmentos.some(f => f.desde === offset);
+}
+
+// Cuenta bancaria: 20 dígitos escritos como uno o varios pedazos seguidos ("0102 1234 56 ...").
+// Se buscan tramos de exactamente 20 dígitos que empiecen y terminen en un pedazo del mensaje,
+// así también se reconoce si viene acompañada de otros datos en la misma línea.
+// Prioridad: (1) empieza con un código de la lista; (2) tiene forma de código de banco (01xx o
+// 06xx) aunque no esté en la lista; (3) cualquier tramo de 20 dígitos que no parezca un teléfono.
+function buscarCuenta(grupos){
+  const formas = [
+    codigo => !!BANCOS_VE[codigo],
+    codigo => /^(01|06)\d{2}$/.test(codigo),
+    codigo => !/^04/.test(codigo)
+  ];
+  for(const cumpleForma of formas){
+    for(const g of grupos){
+      for(let a = 0; a < g.fragmentos.length; a++){
+        const desde = g.fragmentos[a].desde;
+        for(let b = a; b < g.fragmentos.length; b++){
+          const hasta = g.fragmentos[b].desde + g.fragmentos[b].largo;
+          const largo = hasta - desde;
+          if(largo > 20) break;
+          if(largo !== 20) continue;
+          if(!ventanaLibre(g, desde, 20)) continue;
+          const digitos = g.digitos.substr(desde, 20);
+          const codigo = digitos.substr(0, 4);
+          if(!cumpleForma(codigo)) continue;
+          marcarUsado(g, desde, 20);
+          return { cuenta: digitos, codigo: codigo, codigoConocido: !!BANCOS_VE[codigo] };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// Busca una ventana de "largo" dígitos que cumpla el patrón. Primero prueba las que empiezan en
+// un pedazo del mensaje (más confiable) y después cualquier posición.
+function buscarVentana(grupos, patron, largo){
+  for(const exigirBorde of [true, false]){
+    for(const g of grupos){
+      for(let s = 0; s + largo <= g.digitos.length; s++){
+        if(exigirBorde && !esBordeDeFragmento(g, s)) continue;
+        if(!ventanaLibre(g, s, largo)) continue;
+        const valor = g.digitos.substr(s, largo);
+        if(patron.test(valor)){
+          marcarUsado(g, s, largo);
+          return valor;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// Código de banco para pago móvil: SOLO un pedazo de 4 dígitos que esté en la lista conocida.
+// Antes se aceptaba cualquier número de 4 dígitos, y por eso un pedazo de teléfono como "3014"
+// terminaba tomado como banco.
+function buscarCodigoDeBanco(grupos){
+  for(const g of grupos){
+    for(const f of g.fragmentos){
+      if(f.largo !== 4 || !ventanaLibre(g, f.desde, 4)) continue;
+      const texto = g.digitos.substr(f.desde, 4);
+      if(BANCOS_VE[texto]) return { codigo: texto, grupo: g, desde: f.desde };
+    }
+  }
+  return null;
+}
+
+// ¿El número que empieza en esta pieza viene precedido por un prefijo de cédula pegado
+// (V, E, J, CI, CL, "C.I.")? Es la señal más confiable para reconocer una cédula.
+function tienePrefijoDeCedula(piezas, idxNum){
+  let i = idxNum - 1;
+  let separador = '';
+  while(i >= 0 && piezas[i].tipo === 'separador'){ separador = piezas[i].texto + separador; i--; }
+  if(i < 0 || piezas[i].tipo !== 'palabra') return false;
+  if(/[\r\n]/.test(separador) || !/^[.\-\s]*$/.test(separador)) return false;
+  const palabra = normalizar(piezas[i].texto);
+  if(PREFIJOS_CEDULA.has(palabra)) return true;
+  // "C.I." queda partido en dos palabras de una letra
+  if(palabra === 'i'){
+    let j = i - 1;
+    let sep2 = '';
+    while(j >= 0 && piezas[j].tipo === 'separador'){ sep2 = piezas[j].texto + sep2; j--; }
+    if(j >= 0 && piezas[j].tipo === 'palabra' && /^[.\-\s]*$/.test(sep2) &&
+       normalizar(piezas[j].texto) === 'c') return true;
+  }
+  return false;
+}
+
+// Cédula: tramos de 6 a 9 dígitos que empiecen y terminen en un pedazo del mensaje, más el grupo
+// completo cuando tiene entre 6 y 9 dígitos (caso "14 638 205", la cédula partida en tres).
+function buscarCedula(grupos, piezas){
+  const candidatos = [];
+  for(const g of grupos){
+    for(let a = 0; a < g.fragmentos.length; a++){
+      const desde = g.fragmentos[a].desde;
+      for(let b = a; b < g.fragmentos.length; b++){
+        const hasta = g.fragmentos[b].desde + g.fragmentos[b].largo;
+        const largo = hasta - desde;
+        if(largo > 9) break;
+        if(largo < 6) continue;
+        if(!ventanaLibre(g, desde, largo)) continue;
+        candidatos.push({
+          grupo: g, desde: desde, largo: largo,
+          conPrefijo: tienePrefijoDeCedula(piezas, g.fragmentos[a].piezaIdx),
+          digitos: g.digitos.substr(desde, largo)
+        });
+      }
+    }
+    if(g.digitos.length >= 6 && g.digitos.length <= 9 && ventanaLibre(g, 0, g.digitos.length)){
+      candidatos.push({ grupo: g, desde: 0, largo: g.digitos.length, conPrefijo: false, digitos: g.digitos });
+    }
+  }
+  if(candidatos.length === 0) return null;
+  // Primero la que tiene prefijo, después la más larga, después la que aparece antes.
+  candidatos.sort((a, b) => (b.conPrefijo - a.conPrefijo) || (b.largo - a.largo) || (a.desde - b.desde));
+  const elegido = candidatos[0];
+  marcarUsado(elegido.grupo, elegido.desde, elegido.largo);
+  return elegido.digitos;
+}
+
+// Dígitos que quedaron sin usar, para avisar y no perderlos en silencio.
+function digitosSinUsar(grupos){
+  const sobrantes = [];
+  for(const g of grupos){
+    let i = 0;
+    while(i < g.digitos.length){
+      if(g.usado[i]){ i++; continue; }
+      let j = i;
+      while(j < g.digitos.length && !g.usado[j]) j++;
+      sobrantes.push(g.digitos.slice(i, j));
+      i = j;
+    }
+  }
+  return sobrantes;
+}
+
+function partesDeClave(kw){
+  return normalizar(kw).replace(/[^a-z0-9]+/g, ' ').split(' ').filter(p => p.length > 0);
+}
+
+// Busca el nombre de un banco entre las palabras del cliente comparando PALABRA POR PALABRA
+// (no "contiene"): así "venez" no se activa dentro de "venezolano", y además devuelve solamente
+// el fragmento que coincidió, sin arrastrar el nombre del titular ni el resto de la línea.
+function buscarBancoEnPalabras(palabras){
+  const norm = palabras.map(normalizar);
+  for(let i = 0; i < norm.length; i++){
+    for(const codigo of Object.keys(BANCOS_KEYWORDS)){
+      for(const kw of BANCOS_KEYWORDS[codigo]){
+        const partes = partesDeClave(kw);
+        if(partes.length === 0 || i + partes.length > norm.length) continue;
+        let coincide = true;
+        for(let k = 0; k < partes.length; k++){
+          if(norm[i+k] !== partes[k]){ coincide = false; break; }
+        }
+        if(!coincide) continue;
+        // Se incluye el "banco"/"bco" que suele ir delante, con o sin "de" en medio:
+        // "Banco de Venezuela" completo, no solo "Venezuela".
+        let desde = i;
+        if(desde > 0 && (norm[desde-1] === 'banco' || norm[desde-1] === 'bco')){
+          desde--;
+        } else if(desde > 1 && (norm[desde-1] === 'de' || norm[desde-1] === 'del') &&
+                  (norm[desde-2] === 'banco' || norm[desde-2] === 'bco')){
+          desde -= 2;
+        }
+        return { codigo, fragmento: palabras.slice(desde, i + partes.length).join(' '), desde, hasta: i + partes.length };
+      }
+    }
+  }
+  return null;
+}
+
+// Lee el bloque que la vendedora pegó y ordena los datos según sea transferencia o pago móvil.
+// Regla principal: si alguna línea, quitándole guiones/puntos/espacios, tiene 20 dígitos,
+// es transferencia (esa cuenta siempre arranca con el código del banco). Si no, es pago móvil.
+// Importante: nunca se reemplaza ni se borra lo que escribió el cliente — solo se reordena y se
+// le agrega una referencia entre paréntesis (el código si dio el nombre, o el nombre si dio el
+// código). Todo texto que no se pueda asignar a un campo se muestra igual en la comanda.
+function parsearDatosBancarios(textoPegado){
+  const faltantes = [];
+  const sobrantes = [];
+
+  const { piezas, grupos } = analizarMensaje(textoPegado);
+
+  // 1) Cuenta bancaria (20 dígitos) -> transferencia. Si no hay cuenta, es pago móvil.
+  const cuenta = buscarCuenta(grupos);
+  const esPagoMovil = !cuenta;
+
+  // 2) Teléfono (solo pago móvil): 11 dígitos que empiezan en 04, o 10 que empiezan en 4.
+  let telefono = null;
+  if(esPagoMovil){
+    telefono = buscarVentana(grupos, /^04\d{9}$/, 11) || buscarVentana(grupos, /^4\d{9}$/, 10);
+  }
+
+  // 3) Código de banco escrito por el cliente: SOLO si está en la lista conocida.
+  let bancoCodigo = cuenta ? cuenta.codigo : null;
+  if(esPagoMovil){
+    const codigoEscrito = buscarCodigoDeBanco(grupos);
+    if(codigoEscrito){
+      bancoCodigo = codigoEscrito.codigo;
+      marcarUsado(codigoEscrito.grupo, codigoEscrito.desde, 4);
+    }
+  }
+  if(cuenta && !cuenta.codigoConocido){
+    faltantes.push('revisar el código de banco ' + cuenta.codigo + ' (no está en la lista)');
+  }
+
+  // 4) Cédula
+  const cedula = buscarCedula(grupos, piezas);
+
+  // 5) Palabras del cliente: la que nombra un banco es el banco; el resto es el titular.
+  const palabras = [];
+  for(const p of piezas){
+    if(p.tipo === 'palabra' && !PALABRAS_ETIQUETA.has(normalizar(p.texto))) palabras.push(p.texto);
+  }
+  const coincidencia = buscarBancoEnPalabras(palabras);
+  let palabrasLibres = palabras.slice();
+  let bancoTextoCliente = null;
+  if(coincidencia){
+    if(!bancoCodigo) bancoCodigo = coincidencia.codigo;
+    palabrasLibres = palabras.slice(0, coincidencia.desde).concat(palabras.slice(coincidencia.hasta));
+    if(coincidencia.codigo === bancoCodigo){
+      bancoTextoCliente = coincidencia.fragmento;
+    } else {
+      sobrantes.push('"' + coincidencia.fragmento + '" (no coincide con el código del banco)');
+    }
+  }
+
+  // 6) Nombre del titular: en transferencia son las palabras que sobraron, sin el relleno de
+  // los bordes ("Hola, te mando los datos ... gracias" -> solo el nombre).
+  const nombre = esPagoMovil ? null : (limpiarBordes(palabrasLibres).join(' ') || null);
+  if(!esPagoMovil && !nombre) faltantes.push('nombre del titular');
+  // En pago móvil no hay campo para el nombre, así que se informa el texto que no sea relleno.
+  if(esPagoMovil) sobrantes.push(...palabrasLibres.filter(p => !esRelleno(p)));
+
+  // 7) Números que quedaron sin usar: se informan, no se descartan en silencio.
+  sobrantes.push(...digitosSinUsar(grupos));
+
+  if(!cedula) faltantes.push('cédula');
+  if(esPagoMovil && !telefono) faltantes.push('teléfono');
+  if(!bancoCodigo && !bancoTextoCliente) faltantes.push('banco');
+
+
+  // Cómo se muestra el banco. Sin advertencias adentro de la comanda: si el código no está en
+  // la lista, se muestra el número solo y el aviso va en pantalla.
+  let bancoMostrar = null;
+  if(bancoTextoCliente){
+    bancoMostrar = bancoTextoCliente + (bancoCodigo ? ` (${bancoCodigo})` : '');
+  } else if(bancoCodigo){
+    const nombreOficial = BANCOS_VE[bancoCodigo];
+    bancoMostrar = nombreOficial ? `${nombreOficial} (${bancoCodigo})` : bancoCodigo;
+  }
+
+  return {
+    esPagoMovil: esPagoMovil,
+    cuenta: cuenta ? cuenta.cuenta : null,
+    bancoCodigo: bancoCodigo,
+    bancoMostrar: bancoMostrar,
+    cedula: cedula,
+    telefono: telefono,
+    nombre: nombre,
+    faltantes: faltantes,
+    sobrantes: sobrantes
+  };
+}
+
+// --- Revisión de los datos bancarios -------------------------------------------------
+// La app propone; la vendedora confirma. Si algo no cuadra (falta un dato, quedó algo sin
+// ubicar, el banco no está en la lista), se marcan los campos para corregir ahí mismo.
+// La comanda se arma SIEMPRE con estos campos, no con un nuevo análisis del texto pegado.
+let ultimoParseo = null;
+
+function cargarOpcionesDeBanco(codigoExtra){
+  const select = $('campoBanco');
+  const opciones = ['<option value="">(sin banco)</option>'];
+  for(const codigo of Object.keys(BANCOS_VE)){
+    opciones.push('<option value="' + codigo + '">' + BANCOS_VE[codigo] + ' (' + codigo + ')</option>');
+  }
+  if(codigoExtra && !BANCOS_VE[codigoExtra]){
+    opciones.push('<option value="' + codigoExtra + '">código ' + codigoExtra + ' (revisar)</option>');
+  }
+  select.innerHTML = opciones.join('');
+}
+
+function leerCamposDeRevision(){
+  return {
+    tipo: $('campoTipo').value === 'transferencia' ? 'transferencia' : 'pago',
+    banco: $('campoBanco').value || '',
+    cedula: ($('campoCedula').value || '').replace(/\D/g, ''),
+    telefono: ($('campoTelefono').value || '').replace(/\D/g, ''),
+    cuenta: ($('campoCuenta').value || '').replace(/\D/g, ''),
+    nombre: ($('campoNombre').value || '').trim()
+  };
+}
+
+function mostrarCamposSegunTipo(){
+  const esPago = $('campoTipo').value !== 'transferencia';
+  $('cajaTelefono').hidden = !esPago;
+  $('cajaCuenta').hidden = esPago;
+  $('cajaNombre').hidden = esPago;
+}
+
+// Lo que falta para poder mandar una comanda completa.
+function problemasDeLosCampos(){
+  const c = leerCamposDeRevision();
+  const p = [];
+  if(!c.banco) p.push('el banco');
+  else if(!BANCOS_VE[c.banco]) p.push('el código de banco ' + c.banco + ' (no está en la lista)');
+  if(!c.cedula) p.push('la cédula');
+  if(c.tipo === 'pago'){
+    if(!c.telefono) p.push('el teléfono');
+  } else {
+    if(!c.cuenta) p.push('la cuenta');
+    if(!c.nombre) p.push('el nombre del titular');
+  }
+  return p;
+}
+
+// Números o palabras del mensaje que no entraron en ningún campo, sin contar los que ya están
+// (un dato que el cliente repitió no es un problema).
+function sobrantesVisibles(){
+  if(!ultimoParseo) return [];
+  const c = leerCamposDeRevision();
+  const usados = new Set([c.cuenta, c.cedula, c.telefono, c.banco].filter(Boolean).map(String));
+  return ultimoParseo.sobrantes.filter(s => {
+    const digitos = String(s).replace(/\D/g, '');
+    return !(digitos && usados.has(digitos));
+  });
+}
+
+function actualizarBotonComanda(){
+  if(!ultimoParseo){ $('btnCopiar').textContent = 'Generar comanda'; return; }
+  const hayProblemas = problemasDeLosCampos().length > 0 || sobrantesVisibles().length > 0;
+  $('btnCopiar').textContent = hayProblemas ? 'Revisar y generar' : 'Generar comanda';
+}
+
+function pintarRevision(){
+  const c = leerCamposDeRevision();
+  const partes = [c.tipo === 'pago' ? 'Pago móvil' : 'Transferencia'];
+  const nombreBanco = c.banco ? (BANCOS_VE[c.banco] || 'código ' + c.banco) : '';
+  if(c.tipo === 'pago'){
+    if(c.cedula) partes.push('Cédula ' + c.cedula);
+    if(nombreBanco) partes.push(nombreBanco);
+    if(c.telefono) partes.push('Teléfono ' + c.telefono);
+  } else {
+    if(c.cuenta) partes.push('Cuenta ' + c.cuenta);
+    if(c.cedula) partes.push('Cédula ' + c.cedula);
+    if(c.nombre) partes.push('Titular ' + c.nombre);
+    if(nombreBanco) partes.push(nombreBanco);
+  }
+  $('revisionResumen').textContent = partes.join(' · ');
+
+  const avisos = [];
+  const faltan = problemasDeLosCampos();
+  const sobran = sobrantesVisibles();
+  if(faltan.length) avisos.push('Revisá: ' + faltan.join(', ') + '.');
+  if(sobran.length) avisos.push('No pude ubicar: ' + sobran.join(', ') + '.');
+  $('revisionAviso').textContent = avisos.join(' ');
+  $('revisionAviso').hidden = avisos.length === 0;
+  $('revisionTitulo').textContent = avisos.length ? 'Revisá estos datos' : 'Entendí esto';
+  actualizarBotonComanda();
+}
+
+function volcarParseoEnCampos(datos){
+  $('campoTipo').value = datos.esPagoMovil ? 'pago' : 'transferencia';
+  cargarOpcionesDeBanco(datos.bancoCodigo);
+  $('campoBanco').value = datos.bancoCodigo || '';
+  $('campoCedula').value = datos.cedula || '';
+  $('campoTelefono').value = datos.telefono || '';
+  $('campoCuenta').value = datos.cuenta || '';
+  $('campoNombre').value = datos.nombre || '';
+  mostrarCamposSegunTipo();
+}
+
+function actualizarRevision(){
+  const pegado = $('bancoTexto').value.trim();
+  if(!pegado){
+    ultimoParseo = null;
+    $('revisionDatos').hidden = true;
+    $('revisionCampos').hidden = true;
+    actualizarBotonComanda();
+    return;
+  }
+  const datos = parsearDatosBancarios(pegado);
+  ultimoParseo = datos;
+  volcarParseoEnCampos(datos);
+  $('revisionDatos').hidden = false;
+  // Si hay algo para revisar, los campos se abren solos para corregir en el momento.
+  const hayProblemas = problemasDeLosCampos().length > 0 || sobrantesVisibles().length > 0;
+  $('revisionCampos').hidden = !hayProblemas;
+  pintarRevision();
+}
+
+// Arma el bloque de datos tal como lo va a usar el socio. Con el nombre oficial del banco y su
+// código: se lee más claro que la abreviatura que escribió el cliente, que igual queda a la
+// vista en el mensaje original.
+function formatearComanda(c){
+  const banco = c.banco
+    ? (BANCOS_VE[c.banco] ? BANCOS_VE[c.banco] + ' (' + c.banco + ')' : c.banco)
+    : '(sin banco)';
+  if(c.tipo === 'pago'){
+    return ['Pago móvil:', c.cedula || '(sin cédula)', banco, c.telefono || '(sin teléfono)'].join('\n');
+  }
+  return [c.cuenta || '(sin cuenta)', c.cedula || '(sin cédula)', c.nombre || '(sin nombre)', banco].join('\n');
+}
+
+$('bancoTexto').addEventListener('input', actualizarRevision);
+$('btnCorregir').addEventListener('click', () => {
+  $('revisionCampos').hidden = !$('revisionCampos').hidden;
+});
+$('btnRestaurar').addEventListener('click', () => {
+  if(ultimoParseo){
+    volcarParseoEnCampos(ultimoParseo);
+    pintarRevision();
+  }
+});
+$('campoTipo').addEventListener('change', () => { mostrarCamposSegunTipo(); pintarRevision(); });
+for(const id of ['campoBanco', 'campoCedula', 'campoTelefono', 'campoCuenta', 'campoNombre']){
+  $(id).addEventListener('input', pintarRevision);
+  $(id).addEventListener('change', pintarRevision);
+}
+
+function actualizarModoUI(){
+  if(modo === 'clp'){
+    $('btnModoClp').classList.add('activo');
+    $('btnModoVes').classList.remove('activo');
+    $('labelEntrada').textContent = 'Monto que entrega el cliente (CLP)';
+    $('simboloEntrada').textContent = '$';
+    $('labelSalida').textContent = 'El cliente recibe';
+  } else {
+    $('btnModoVes').classList.add('activo');
+    $('btnModoClp').classList.remove('activo');
+    $('labelEntrada').textContent = 'Bolívares que pide el cliente (VES)';
+    $('simboloEntrada').textContent = 'Bs';
+    $('labelSalida').textContent = 'El cliente paga en pesos';
+  }
+  calcular();
+}
+$('btnModoClp').addEventListener('click', () => { modo='clp'; actualizarModoUI(); });
+$('btnModoVes').addEventListener('click', () => { modo='ves'; actualizarModoUI(); });
+
+function calcular(){
+  const tasa = tasaElegida();
+  const monto = numeroMonto($('monto').value);
+  if(tasa <= 0){
+    $('valorSalida').textContent = (tasaFecha && !tasaVigente())
+      ? 'Cargá la tasa de hoy'
+      : 'Falta la tasa ' + tipoTasa;
+    return;
+  }
+  if(modo === 'clp'){
+    $('valorSalida').textContent = fmtVES(monto * tasa);
+  } else {
+    $('valorSalida').textContent = fmtCLP(monto / tasa);
+  }
+}
+// Las tasas ya recalculan solas en alEscribirTasa y en aplicarMensajeDeTasas.
+$('monto').addEventListener('input', calcular);
+
+$('btnCopiar').addEventListener('click', () => {
+  if(!tasaVigente()){
+    alert(tasaFecha
+      ? 'La tasa cargada es del ' + fechaCorta(tasaFecha) + ' y no se puede usar.\n\nCargá la tasa de hoy (o escribila a mano) antes de generar la comanda.'
+      : 'Falta cargar la tasa de hoy.\n\nEscribila arriba, o pegá el mensaje de tasas del día.');
+    return;
+  }
+  const tasa = tasaElegida();
+  const monto = numeroMonto($('monto').value);
+  if(tasa<=0){
+    alert('Falta escribir la tasa (' + (tipoTasa==='normal' ? 'normal' : 'especial') + ') arriba de todo.');
+    return;
+  }
+  if(monto<=0){
+    alert('Falta escribir el monto.');
+    return;
+  }
+
+  // Antes de generar nada: si la tasa parece un error de tipeo, se pide confirmación explícita.
+  const avisoTasa = revisarTasa(tasa, tipoTasa);
+  if(avisoTasa && !confirm(avisoTasa + '\n\n¿Confirmas que la tasa ' + tipoTasa + ' es la correcta?')){
+    return;
+  }
+
+  const nombre = $('nombreVendedor').value.trim();
+  const bloqueBancoPegado = $('bancoTexto').value.trim();
+
+  let bloqueBanco = '';
+  if(bloqueBancoPegado){
+    // La comanda se arma con los campos revisados, no con un nuevo análisis del texto.
+    const campos = leerCamposDeRevision();
+    const avisos = [];
+    const faltan = problemasDeLosCampos();
+    const sobran = sobrantesVisibles();
+    if(faltan.length) avisos.push('Revisá: ' + faltan.join(', ') + '.');
+    if(sobran.length) avisos.push('No pude ubicar: ' + sobran.join(', ') + '.');
+    if(avisos.length > 0){
+      $('revisionCampos').hidden = false;
+      if(!confirm('Ojo:\n\n' + avisos.join('\n\n') + '\n\n¿Generar la comanda igual?')) return;
+    }
+    bloqueBanco = formatearComanda(campos) + '\n\n';
+  }
+
+  let lineaClp, lineaVes;
+  if(modo === 'clp'){
+    lineaClp = Math.round(monto).toLocaleString('es-CL') + ' clp';
+    lineaVes = Math.round(monto*tasa).toLocaleString('es-VE') + ' bs';
+  } else {
+    lineaVes = Math.round(monto).toLocaleString('es-VE') + ' bs';
+    lineaClp = Math.round(monto/tasa).toLocaleString('es-CL') + ' clp';
+  }
+
+  // Fecha y tasa aplicada al final: el socio puede verificar el cálculo, y no expone ningún
+  // dato interno (es la misma tasa final que ya está publicada).
+  const fecha = new Date().toLocaleDateString('es-CL');
+  const tasaTexto = (tipoTasa === 'normal' ? $('tasaNormal').value : $('tasaEspecial').value).trim() || String(tasa);
+  const pie = 'Tasa ' + tipoTasa + ': ' + tasaTexto + ' · ' + fecha;
+
+  const texto = `${bloqueBanco}${lineaClp}\n${lineaVes}\n\n${nombre}\n${pie}`;
+
+  // Queda registrada como "última tasa usada", para poder avisar si mañana se escribe otra muy distinta.
+  guardarUltimaTasa(tipoTasa, tasa);
+
+  // Siempre mostramos el texto, seleccionable a mano — esto funciona siempre, sin excepción.
+  $('comandaCaja').style.display = 'block';
+  $('comandaTexto').value = texto;
+  $('comandaTexto').focus();
+  $('comandaTexto').select();
+
+  // Intento adicional de copiado automático, silencioso — si funciona, mejor, pero el texto de arriba ya está disponible igual.
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(texto).then(mostrarToast).catch(() => {});
+    } else if(document.execCommand){
+      document.execCommand('copy');
+      mostrarToast();
+    }
+  } catch(e){ /* no pasa nada, el texto ya quedo visible para copiar a mano */ }
+});
+
+function mostrarToast(){
+  const toast = $('toast');
+  toast.textContent = 'Copiado';
+  toast.classList.add('mostrar');
+  setTimeout(() => toast.classList.remove('mostrar'), 1800);
+}
+</script>
+
+</body>
+</html>
