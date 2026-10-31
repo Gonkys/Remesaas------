@@ -365,6 +365,7 @@
               <select id="campoTipo">
                 <option value="pago">Pago móvil</option>
                 <option value="transferencia">Transferencia</option>
+                <option value="ambas">Pago móvil y transferencia</option>
               </select>
             </div>
             <div>
@@ -415,7 +416,7 @@
 const $ = (id) => document.getElementById(id);
 
 // Identificación de la copia: permite saber de un vistazo qué versión tiene cada vendedora.
-const VERSION = 'v14';
+const VERSION = 'v15';
 
 // --- Límites de seguridad de la tasa (los puede ajustar el dueño del negocio).
 // Un error de tipeo en la tasa cuesta dinero igual que un error en el monto: por eso, antes de
@@ -1196,33 +1197,26 @@ function buscarBancoEnPalabras(palabras){
 // le agrega una referencia entre paréntesis (el código si dio el nombre, o el nombre si dio el
 // código). Todo texto que no se pueda asignar a un campo se muestra igual en la comanda.
 function parsearDatosBancarios(textoPegado){
-  const faltantes = [];
   const sobrantes = [];
 
   const { piezas, grupos } = analizarMensaje(textoPegado);
 
-  // 1) Cuenta bancaria (20 dígitos) -> transferencia. Si no hay cuenta, es pago móvil.
+  // 1) Cuenta bancaria (20 dígitos): si viene, hay transferencia disponible.
   const cuenta = buscarCuenta(grupos);
-  const esPagoMovil = !cuenta;
 
-  // 2) Teléfono (solo pago móvil): 11 dígitos que empiezan en 04, o 10 que empiezan en 4.
-  let telefono = null;
-  if(esPagoMovil){
-    telefono = buscarVentana(grupos, /^04\d{9}$/, 11) || buscarVentana(grupos, /^4\d{9}$/, 10);
-  }
+  // 2) Teléfono: se busca SIEMPRE, aunque venga una cuenta. El cliente puede mandar las dos
+  // cosas (cuenta y teléfono) y el socio elige con qué pagar. Antes, si había cuenta, el
+  // teléfono ni se buscaba y se perdía.
+  const telefono = buscarVentana(grupos, /^04\d{9}$/, 11) || buscarVentana(grupos, /^4\d{9}$/, 10);
 
-  // 3) Código de banco escrito por el cliente: SOLO si está en la lista conocida.
-  let bancoCodigo = cuenta ? cuenta.codigo : null;
-  if(esPagoMovil){
-    const codigoEscrito = buscarCodigoDeBanco(grupos);
-    if(codigoEscrito){
-      bancoCodigo = codigoEscrito.codigo;
-      marcarUsado(codigoEscrito.grupo, codigoEscrito.desde, 4);
-    }
+  // 3) Código de banco: el que escribió el cliente (4 dígitos de la lista) o el de la cuenta.
+  let bancoCodigo = null;
+  const codigoEscrito = buscarCodigoDeBanco(grupos);
+  if(codigoEscrito){
+    bancoCodigo = codigoEscrito.codigo;
+    marcarUsado(codigoEscrito.grupo, codigoEscrito.desde, 4);
   }
-  if(cuenta && !cuenta.codigoConocido){
-    faltantes.push('revisar el código de banco ' + cuenta.codigo + ' (no está en la lista)');
-  }
+  if(!bancoCodigo && cuenta) bancoCodigo = cuenta.codigo;
 
   // 4) Cédula
   const cedula = buscarCedula(grupos, piezas);
@@ -1245,20 +1239,18 @@ function parsearDatosBancarios(textoPegado){
     }
   }
 
-  // 6) Nombre del titular: en transferencia son las palabras que sobraron, sin el relleno de
-  // los bordes ("Hola, te mando los datos ... gracias" -> solo el nombre).
-  const nombre = esPagoMovil ? null : (limpiarBordes(palabrasLibres).join(' ') || null);
-  if(!esPagoMovil && !nombre) faltantes.push('nombre del titular');
-  // En pago móvil no hay campo para el nombre, así que se informa el texto que no sea relleno.
-  if(esPagoMovil) sobrantes.push(...palabrasLibres.filter(p => !esRelleno(p)));
+  // 6) Nombre del titular: ahora sirve para los DOS casos (pago móvil y transferencia).
+  // Se saca el relleno de los bordes ("Hola, te mando los datos ... gracias" -> solo el nombre).
+  // Una sola palabra en minúscula no parece un nombre ("hola equipo"): se informa aparte.
+  const posibles = limpiarBordes(palabrasLibres);
+  let nombre = posibles.join(' ') || null;
+  if(nombre && posibles.length === 1 && nombre === nombre.toLowerCase()){
+    sobrantes.push(nombre);
+    nombre = null;
+  }
 
   // 7) Números que quedaron sin usar: se informan, no se descartan en silencio.
   sobrantes.push(...digitosSinUsar(grupos));
-
-  if(!cedula) faltantes.push('cédula');
-  if(esPagoMovil && !telefono) faltantes.push('teléfono');
-  if(!bancoCodigo && !bancoTextoCliente) faltantes.push('banco');
-
 
   // Cómo se muestra el banco. Sin advertencias adentro de la comanda: si el código no está en
   // la lista, se muestra el número solo y el aviso va en pantalla.
@@ -1271,14 +1263,12 @@ function parsearDatosBancarios(textoPegado){
   }
 
   return {
-    esPagoMovil: esPagoMovil,
     cuenta: cuenta ? cuenta.cuenta : null,
     bancoCodigo: bancoCodigo,
     bancoMostrar: bancoMostrar,
     cedula: cedula,
     telefono: telefono,
     nombre: nombre,
-    faltantes: faltantes,
     sobrantes: sobrantes
   };
 }
@@ -1302,8 +1292,9 @@ function cargarOpcionesDeBanco(codigoExtra){
 }
 
 function leerCamposDeRevision(){
+  const tipo = $('campoTipo').value;
   return {
-    tipo: $('campoTipo').value === 'transferencia' ? 'transferencia' : 'pago',
+    tipo: (tipo === 'transferencia' || tipo === 'ambas') ? tipo : 'pago',
     banco: $('campoBanco').value || '',
     cedula: ($('campoCedula').value || '').replace(/\D/g, ''),
     telefono: ($('campoTelefono').value || '').replace(/\D/g, ''),
@@ -1313,25 +1304,25 @@ function leerCamposDeRevision(){
 }
 
 function mostrarCamposSegunTipo(){
-  const esPago = $('campoTipo').value !== 'transferencia';
-  $('cajaTelefono').hidden = !esPago;
-  $('cajaCuenta').hidden = esPago;
-  $('cajaNombre').hidden = esPago;
+  const tipo = $('campoTipo').value;
+  $('cajaTelefono').hidden = !(tipo === 'pago' || tipo === 'ambas');
+  $('cajaCuenta').hidden = !(tipo === 'transferencia' || tipo === 'ambas');
+  // El nombre del titular se usa en los dos casos.
+  $('cajaNombre').hidden = false;
 }
 
-// Lo que falta para poder mandar una comanda completa.
+// Lo que falta para poder mandar la comanda completa, según los bloques elegidos.
 function problemasDeLosCampos(){
   const c = leerCamposDeRevision();
+  const pago = c.tipo === 'pago' || c.tipo === 'ambas';
+  const transf = c.tipo === 'transferencia' || c.tipo === 'ambas';
   const p = [];
   if(!c.banco) p.push('el banco');
   else if(!BANCOS_VE[c.banco]) p.push('el código de banco ' + c.banco + ' (no está en la lista)');
   if(!c.cedula) p.push('la cédula');
-  if(c.tipo === 'pago'){
-    if(!c.telefono) p.push('el teléfono');
-  } else {
-    if(!c.cuenta) p.push('la cuenta');
-    if(!c.nombre) p.push('el nombre del titular');
-  }
+  if(pago && !c.telefono) p.push('el teléfono');
+  if(transf && !c.cuenta) p.push('la cuenta');
+  if(transf && !c.nombre) p.push('el nombre del titular');
   return p;
 }
 
@@ -1355,19 +1346,25 @@ function actualizarBotonComanda(){
 
 function pintarRevision(){
   const c = leerCamposDeRevision();
-  const partes = [c.tipo === 'pago' ? 'Pago móvil' : 'Transferencia'];
   const nombreBanco = c.banco ? (BANCOS_VE[c.banco] || 'código ' + c.banco) : '';
-  if(c.tipo === 'pago'){
-    if(c.cedula) partes.push('Cédula ' + c.cedula);
-    if(nombreBanco) partes.push(nombreBanco);
-    if(c.telefono) partes.push('Teléfono ' + c.telefono);
-  } else {
-    if(c.cuenta) partes.push('Cuenta ' + c.cuenta);
-    if(c.cedula) partes.push('Cédula ' + c.cedula);
-    if(c.nombre) partes.push('Titular ' + c.nombre);
-    if(nombreBanco) partes.push(nombreBanco);
+  const partes = [];
+  if(c.tipo === 'pago' || c.tipo === 'ambas'){
+    const p = ['Pago móvil'];
+    if(c.cedula) p.push('Cédula ' + c.cedula);
+    if(nombreBanco) p.push(nombreBanco);
+    if(c.telefono) p.push('Teléfono ' + c.telefono);
+    if(c.nombre) p.push('Titular ' + c.nombre);
+    partes.push(p.join(' · '));
   }
-  $('revisionResumen').textContent = partes.join(' · ');
+  if(c.tipo === 'transferencia' || c.tipo === 'ambas'){
+    const t = ['Transferencia'];
+    if(c.cuenta) t.push('Cuenta ' + c.cuenta);
+    if(c.cedula) t.push('Cédula ' + c.cedula);
+    if(c.nombre) t.push('Titular ' + c.nombre);
+    if(nombreBanco) t.push(nombreBanco);
+    partes.push(t.join(' · '));
+  }
+  $('revisionResumen').textContent = partes.join('   —   ');
 
   const avisos = [];
   const faltan = problemasDeLosCampos();
@@ -1381,7 +1378,9 @@ function pintarRevision(){
 }
 
 function volcarParseoEnCampos(datos){
-  $('campoTipo').value = datos.esPagoMovil ? 'pago' : 'transferencia';
+  const hayPago = !!(datos.cedula && datos.telefono);
+  const hayTransf = !!datos.cuenta;
+  $('campoTipo').value = (hayPago && hayTransf) ? 'ambas' : (hayTransf ? 'transferencia' : 'pago');
   cargarOpcionesDeBanco(datos.bancoCodigo);
   $('campoBanco').value = datos.bancoCodigo || '';
   $('campoCedula').value = datos.cedula || '';
@@ -1410,17 +1409,31 @@ function actualizarRevision(){
   pintarRevision();
 }
 
-// Arma el bloque de datos tal como lo va a usar el socio. Con el nombre oficial del banco y su
-// código: se lee más claro que la abreviatura que escribió el cliente, que igual queda a la
-// vista en el mensaje original.
+// Arma el bloque (o los bloques) de datos tal como los usa el socio. Formato acordado con él y
+// ya probado en su aplicación del banco: un dato por línea, la cuenta con sus 20 dígitos, la
+// cédula, el nombre del titular y el banco con su código al final. Sin rótulos en la
+// transferencia (así lo probó); el pago móvil conserva su encabezado porque ya funcionaba.
 function formatearComanda(c){
   const banco = c.banco
     ? (BANCOS_VE[c.banco] ? BANCOS_VE[c.banco] + ' (' + c.banco + ')' : c.banco)
-    : '(sin banco)';
-  if(c.tipo === 'pago'){
-    return ['Pago móvil:', c.cedula || '(sin cédula)', banco, c.telefono || '(sin teléfono)'].join('\n');
+    : null;
+  const bloques = [];
+
+  // La transferencia va primero: es el formato que el socio ya tiene probado.
+  if(c.tipo === 'transferencia' || c.tipo === 'ambas'){
+    bloques.push([
+      c.cuenta || '(sin cuenta)',
+      c.cedula || '(sin cédula)',
+      c.nombre || '(sin nombre)',
+      banco || '(sin banco)'
+    ].join('\n'));
   }
-  return [c.cuenta || '(sin cuenta)', c.cedula || '(sin cédula)', c.nombre || '(sin nombre)', banco].join('\n');
+  if(c.tipo === 'pago' || c.tipo === 'ambas'){
+    const lineas = ['Pago móvil:', c.cedula || '(sin cédula)', banco || '(sin banco)', c.telefono || '(sin teléfono)'];
+    if(c.nombre) lineas.push(c.nombre);
+    bloques.push(lineas.join('\n'));
+  }
+  return bloques.join('\n\n');
 }
 
 $('bancoTexto').addEventListener('input', actualizarRevision);
@@ -1516,7 +1529,7 @@ $('btnCopiar').addEventListener('click', () => {
       $('revisionCampos').hidden = false;
       if(!confirm('Ojo:\n\n' + avisos.join('\n\n') + '\n\n¿Generar la comanda igual?')) return;
     }
-    bloqueBanco = formatearComanda(campos) + '\n\n';
+    bloqueBanco = formatearComanda(campos);
   }
 
   let lineaClp, lineaVes;
@@ -1528,13 +1541,16 @@ $('btnCopiar').addEventListener('click', () => {
     lineaClp = Math.round(monto/tasa).toLocaleString('es-CL') + ' clp';
   }
 
-  // Fecha y tasa aplicada al final: el socio puede verificar el cálculo, y no expone ningún
-  // dato interno (es la misma tasa final que ya está publicada).
-  const fecha = new Date().toLocaleDateString('es-CL');
-  const tasaTexto = (tipoTasa === 'normal' ? $('tasaNormal').value : $('tasaEspecial').value).trim() || String(tasa);
-  const pie = 'Tasa ' + tipoTasa + ': ' + tasaTexto + ' · ' + fecha;
+  // La tasa va SIN la fecha: la fecha era justo lo que la aplicación del banco tomaba como monto.
+  // El nombre de la vendedora va entre comillas, como se usa hoy.
+  const etiqueta = tipoTasa === 'normal' ? 'Normal' : 'Especial';
+  const tasaTexto = ((tipoTasa === 'normal' ? $('tasaNormal').value : $('tasaEspecial').value).trim() || String(tasa))
+    .replace('.', ',');
+  const pie = 'Tasa ' + etiqueta + ' (' + tasaTexto + ')';
 
-  const texto = `${bloqueBanco}${lineaClp}\n${lineaVes}\n\n${nombre}\n${pie}`;
+  const texto = (bloqueBanco ? bloqueBanco + '\n\n' : '') +
+                lineaClp + '\n' + lineaVes + '\n\n\n' +
+                pie + (nombre ? '\n\n"' + nombre + '"' : '');
 
   // Queda registrada como "última tasa usada", para poder avisar si mañana se escribe otra muy distinta.
   guardarUltimaTasa(tipoTasa, tasa);
