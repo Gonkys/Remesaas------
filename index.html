@@ -172,6 +172,9 @@
     font-family:'Courier New',monospace; font-size:40px; font-weight:700;
     color:var(--acento-texto); line-height:1.15; word-break:break-all;
   }
+  .resultado-aviso{
+    margin:8px 0 0; font-size:11.5px; font-weight:600; color:var(--alerta); line-height:1.4;
+  }
 
   .acciones{ margin-top:20px; }
   .acciones button{
@@ -342,6 +345,7 @@
     <div class="resultado">
       <label id="labelSalida">El cliente recibe</label>
       <div class="valor" id="valorSalida">Bs 0,00</div>
+      <p class="resultado-aviso" id="avisoTasaResultado" hidden></p>
     </div>
 
     <div class="datos-bancarios">
@@ -416,7 +420,7 @@
 const $ = (id) => document.getElementById(id);
 
 // Identificación de la copia: permite saber de un vistazo qué versión tiene cada vendedora.
-const VERSION = 'v15';
+const VERSION = 'v16';
 
 // --- Límites de seguridad de la tasa (los puede ajustar el dueño del negocio).
 // Un error de tipeo en la tasa cuesta dinero igual que un error en el monto: por eso, antes de
@@ -559,6 +563,21 @@ function pintarEstadoTasa(){
     caja.classList.add('vacia');
     texto.textContent = 'Falta cargar la tasa de hoy';
     boton.textContent = 'Cargar la de hoy';
+  }
+  avisarTasaVencida();
+}
+
+// Aviso debajo del resultado: la tasa cargada es de otro día. No bloquea la herramienta (el
+// dueño puede autorizar que se use la de ayer), pero queda siempre a la vista.
+function avisarTasaVencida(){
+  const nota = $('avisoTasaResultado');
+  if(!nota) return;
+  if(tasaFecha && !tasaVigente()){
+    nota.textContent = 'Estás usando la tasa del ' + fechaCorta(tasaFecha) + ', que no es la de hoy.';
+    nota.hidden = false;
+  } else {
+    nota.textContent = '';
+    nota.hidden = true;
   }
 }
 
@@ -878,7 +897,8 @@ $('btnTasaEspecial').addEventListener('click', () => {
 });
 
 function tasaElegida(){
-  if(!tasaVigente()) return 0;
+  // La tasa de otro día se puede usar (el dueño a veces lo autoriza). El aviso está a la vista
+  // y la comanda pide confirmación antes de generarse.
   return numeroTasa(tipoTasa === 'normal' ? $('tasaNormal').value : $('tasaEspecial').value);
 }
 
@@ -1475,9 +1495,7 @@ function calcular(){
   const tasa = tasaElegida();
   const monto = numeroMonto($('monto').value);
   if(tasa <= 0){
-    $('valorSalida').textContent = (tasaFecha && !tasaVigente())
-      ? 'Cargá la tasa de hoy'
-      : 'Falta la tasa ' + tipoTasa;
+    $('valorSalida').textContent = 'Falta la tasa ' + tipoTasa;
     return;
   }
   if(modo === 'clp'){
@@ -1490,11 +1508,10 @@ function calcular(){
 $('monto').addEventListener('input', calcular);
 
 $('btnCopiar').addEventListener('click', () => {
-  if(!tasaVigente()){
-    alert(tasaFecha
-      ? 'La tasa cargada es del ' + fechaCorta(tasaFecha) + ' y no se puede usar.\n\nCargá la tasa de hoy (o escribila a mano) antes de generar la comanda.'
-      : 'Falta cargar la tasa de hoy.\n\nEscribila arriba, o pegá el mensaje de tasas del día.');
-    return;
+  if(tasaFecha && !tasaVigente()){
+    if(!confirm('Ojo: la tasa cargada es del ' + fechaCorta(tasaFecha) + ', no es la de hoy.\n\n¿La usamos igual?')){
+      return;
+    }
   }
   const tasa = tasaElegida();
   const monto = numeroMonto($('monto').value);
