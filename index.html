@@ -443,7 +443,7 @@
 const $ = (id) => document.getElementById(id);
 
 // Identificación de la copia: permite saber de un vistazo qué versión tiene cada vendedora.
-const VERSION = 'v28';
+const VERSION = 'v29';
 
 // --- Límites de seguridad de la tasa (los puede ajustar el dueño del negocio).
 // Un error de tipeo en la tasa cuesta dinero igual que un error en el monto: por eso, antes de
@@ -1741,6 +1741,7 @@ $('btnCopiar').addEventListener('click', () => {
     '[' + lineaClp + ']',
     lineaVes,                       // sin corchetes: así viaja el monto
     '[Tasa ' + etiqueta + ' ' + tasaPunto + ']',
+    '',                             // línea en blanco (pedido del dueño)
     '[Código: ' + codigo + ']'
   ];
   if(nombreCliente) extras.push('[Cliente: ' + nombreCliente + ']');
