@@ -134,6 +134,9 @@
     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
     font-size:16px; font-weight:600;
   }
+  .aviso-campo{
+    margin:6px 0 0; font-size:11px; font-weight:600; color:var(--alerta); line-height:1.4;
+  }
 
   .datos-bancarios{
     margin-top:22px; padding-top:18px; border-top:1px solid var(--line);
@@ -174,6 +177,14 @@
   }
   .resultado-aviso{
     margin:8px 0 0; font-size:11.5px; font-weight:600; color:var(--alerta); line-height:1.4;
+  }
+  .boton-copiar{
+    width:100%; margin-top:10px; border:1px solid var(--line); border-radius:10px;
+    background:var(--fondo); color:var(--texto); font-size:13px; font-weight:700;
+    padding:11px; cursor:pointer;
+  }
+  .nota-copiar{
+    margin:8px 0 0; font-size:11px; color:var(--texto-2); line-height:1.5;
   }
 
   .acciones{ margin-top:20px; }
@@ -318,9 +329,17 @@
   <div class="calc-card">
 
     <div class="campo campo-nombre">
-      <label>Tu nombre</label>
+      <label>Vendedora</label>
       <div class="fila">
-        <input type="text" id="nombreVendedor" placeholder="Escribe tu nombre">
+        <input type="text" id="nombreVendedor" placeholder="Escribe tu nombre" autocomplete="off">
+      </div>
+      <p class="aviso-campo" id="avisoVendedora" hidden></p>
+    </div>
+
+    <div class="campo campo-nombre">
+      <label>Nombre del cliente (opcional)</label>
+      <div class="fila">
+        <input type="text" id="nombreCliente" placeholder="Para ubicar la remesa" autocomplete="off">
       </div>
     </div>
 
@@ -406,8 +425,10 @@
 
     <div class="comanda-caja" id="comandaCaja" style="display:none;">
       <label>Mantén presionado el texto y elige "Copiar"</label>
-      <textarea id="comandaTexto" readonly rows="5"></textarea>
+      <textarea id="comandaTexto" readonly rows="6"></textarea>
+      <button type="button" id="btnCopiarComanda" class="boton-copiar">Copiar comanda</button>
     </div>
+    <p class="aviso-campo" id="avisoCopia" hidden></p>
 
   </div>
 
@@ -420,7 +441,7 @@
 const $ = (id) => document.getElementById(id);
 
 // Identificación de la copia: permite saber de un vistazo qué versión tiene cada vendedora.
-const VERSION = 'v16';
+const VERSION = 'v27';
 
 // --- Límites de seguridad de la tasa (los puede ajustar el dueño del negocio).
 // Un error de tipeo en la tasa cuesta dinero igual que un error en el monto: por eso, antes de
@@ -774,15 +795,32 @@ $('tasaMensaje').addEventListener('input', () => {
 
 $('tasaNormal').addEventListener('input', () => alEscribirTasa('normal'));
 $('tasaEspecial').addEventListener('input', () => alEscribirTasa('especial'));
-$('nombreVendedor').addEventListener('input', guardarNombre);
+$('nombreVendedor').addEventListener('input', () => { guardarNombre(); revisarVendedora(); });
+$('nombreVendedor').addEventListener('change', () => {
+  const campo = $('nombreVendedor');
+  if(campo.value.trim()){
+    campo.value = vendedoraCanonica(campo.value);   // ya devuelve con inicial mayúscula
+    guardarNombre();
+  }
+  revisarVendedora();
+});
+// El nombre del cliente también se muestra con inicial mayúscula.
+$('nombreCliente').addEventListener('change', () => {
+  const campo = $('nombreCliente');
+  if(campo.value.trim()) campo.value = formatoTradicional(campo.value);
+});
 
 cargarTasas();
 cargarNombre();
+revisarVendedora();
 pintarEstadoTasa();
 calcular();
 
 // Si la app está publicada, se baja la tasa del día. Si no hay internet, sigue con lo que haya.
 intentarTasaPublicada();
+
+// Las comandas que no pudieron enviarse al libro se reintentan al abrir.
+setTimeout(reintentarPendientes, 4000);
 
 // Al volver a la app (por ejemplo, al día siguiente), si la tasa no es de hoy se reintenta.
 if(document.addEventListener){
@@ -802,6 +840,130 @@ function guardarNombre(){
 function cargarNombre(){
   const guardado = leer('remesas_nombre');
   if(guardado) $('nombreVendedor').value = guardado;
+}
+
+// --- Nombres de las vendedoras ------------------------------------------------------
+// El libro de control acepta solo estos nombres, en formato tradicional (inicial mayúscula).
+const VENDEDORAS_VALIDAS = ['Alejandra', 'Durgelys', 'Felipe', 'Francis', 'Kenia', 'Lix', 'Majo',
+                            'Moises', 'Nelsis', 'Nene', 'Rosmar', 'Directa'];
+
+// Formato de los nombres: inicial mayúscula en cada palabra, salvo las partículas
+// ("María de los Ángeles" queda bien escrito).
+const CONECTORES_NOMBRE = ['de', 'del', 'la', 'las', 'los', 'y', 'e'];
+
+function formatoTradicional(texto){
+  const palabras = String(texto || '').trim().toLowerCase().split(/\s+/).filter((p) => p.length > 0);
+  return palabras.map((palabra, i) => {
+    if(i > 0 && CONECTORES_NOMBRE.indexOf(palabra) >= 0) return palabra;
+    return palabra.charAt(0).toUpperCase() + palabra.slice(1);
+  }).join(' ');
+}
+function esVendedoraValida(texto){
+  const buscado = String(texto || '').trim().toLowerCase();
+  return VENDEDORAS_VALIDAS.some((v) => v.toLowerCase() === buscado);
+}
+function vendedoraCanonica(texto){
+  const buscado = String(texto || '').trim().toLowerCase();
+  const encontrada = VENDEDORAS_VALIDAS.find((v) => v.toLowerCase() === buscado);
+  return encontrada || formatoTradicional(texto);
+}
+function revisarVendedora(){
+  const nota = $('avisoVendedora');
+  if(!nota) return;
+  const texto = $('nombreVendedor').value.trim();
+  if(texto && !esVendedoraValida(texto)){
+    nota.textContent = 'Ese nombre no está registrado. Escribilo igual que en el libro: ' +
+                       VENDEDORAS_VALIDAS.join(', ') + '.';
+    nota.hidden = false;
+  } else {
+    nota.textContent = '';
+    nota.hidden = true;
+  }
+}
+
+// --- Código único de la comanda ------------------------------------------------------
+// Formato: C-DDMM-XXXX (día y mes + 4 caracteres al azar). Sin letras que se confunden
+// a la vista: ni O, ni 0, ni I, ni 1, ni L.
+const ALFABETO_CODIGO = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+const CLAVE_CODIGOS = 'remesas_codigos';
+
+function leerCodigosUsados(){
+  try{ return JSON.parse(leer(CLAVE_CODIGOS) || '[]'); }catch(e){ return []; }
+}
+function guardarCodigoUsado(codigo){
+  try{
+    const usados = leerCodigosUsados();
+    usados.push(codigo);
+    while(usados.length > 300) usados.shift();
+    guardar(CLAVE_CODIGOS, JSON.stringify(usados));
+  }catch(e){ /* si no hay almacenamiento, se sigue igual */ }
+}
+function nuevoCodigo(){
+  const hoy = new Date();
+  const ddmm = String(hoy.getDate()).padStart(2, '0') + String(hoy.getMonth() + 1).padStart(2, '0');
+  const usados = new Set(leerCodigosUsados());
+  let codigo = '';
+  do{
+    let azar = '';
+    for(let i = 0; i < 4; i++){
+      azar += ALFABETO_CODIGO[Math.floor(Math.random() * ALFABETO_CODIGO.length)];
+    }
+    codigo = 'C-' + ddmm + '-' + azar;
+  } while(usados.has(codigo));
+  guardarCodigoUsado(codigo);
+  return codigo;
+}
+
+// --- Hora local HH:MM (para el libro de control) ------------------------------------
+function horaActual(){
+  const d = new Date();
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
+// --- Envío silencioso al libro de control --------------------------------------------
+// Si falla, la vendedora no ve nada: la comanda ya está generada. Se reintenta una vez y,
+// si sigue fallando, queda en cola y se reintenta al abrir la app.
+const URL_RECEPTOR = 'https://script.google.com/macros/s/AKfycbzll5cmWnjloalls83oyB6ZZk4A-_itklxtYRPQLUe6gA8g9Lv-tWVrFtXo3k_JyHaUuA/exec';
+const TOKEN_LIBRO = 'mvd-remesas-2026';
+const CLAVE_PENDIENTES = 'remesas_pendientes';
+
+function leerPendientes(){
+  try{ return JSON.parse(leer(CLAVE_PENDIENTES) || '[]'); }catch(e){ return []; }
+}
+function guardarPendiente(payload){
+  const cola = leerPendientes();
+  if(cola.some((p) => p && p.codigo === payload.codigo)) return;
+  cola.push(payload);
+  while(cola.length > 50) cola.shift();
+  guardar(CLAVE_PENDIENTES, JSON.stringify(cola));
+}
+function quitarPendiente(codigo){
+  guardar(CLAVE_PENDIENTES, JSON.stringify(leerPendientes().filter((p) => p && p.codigo !== codigo)));
+}
+function enviarAlLibro(payload, intento){
+  if(!URL_RECEPTOR || URL_RECEPTOR.indexOf('http') !== 0) return Promise.resolve();
+  intento = intento || 0;
+  return fetch(URL_RECEPTOR, {
+    method: 'POST',
+    // text/plain evita el preflight de CORS; el receptor lee el JSON igual.
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(payload),
+    redirect: 'follow'
+  }).then((r) => {
+    if(r && r.ok === false) throw new Error('HTTP ' + r.status);
+    quitarPendiente(payload.codigo);
+  }).catch(() => {
+    if(intento < 1){
+      setTimeout(() => { enviarAlLibro(payload, intento + 1); }, 5000);
+    } else {
+      guardarPendiente(payload);
+    }
+  });
+}
+function reintentarPendientes(){
+  for(const payload of leerPendientes()){
+    if(payload && payload.codigo) enviarAlLibro(payload, 1);
+  }
 }
 
 // Última tasa realmente usada en una comanda: sirve de referencia para detectar un error de tipeo.
@@ -873,6 +1035,7 @@ if(window.matchMedia){
 window.addEventListener('pageshow', () => {
   $('monto').value = '';
   $('bancoTexto').value = '';
+  $('nombreCliente').value = '';
   actualizarRevision();
   calcular();
 });
@@ -1434,22 +1597,23 @@ function actualizarRevision(){
 // cédula, el nombre del titular y el banco con su código al final. Sin rótulos en la
 // transferencia (así lo probó); el pago móvil conserva su encabezado porque ya funcionaba.
 function formatearComanda(c){
+  // Primero el código de banco (así lo reconoce la app del socio: "0105 - BANCO MERCANTIL"),
+  // después la cuenta, la cédula y el nombre. Sin rótulos que la app pueda confundir.
   const banco = c.banco
-    ? (BANCOS_VE[c.banco] ? BANCOS_VE[c.banco] + ' (' + c.banco + ')' : c.banco)
+    ? (BANCOS_VE[c.banco] ? c.banco + ' - ' + BANCOS_VE[c.banco].toUpperCase() : c.banco)
     : null;
   const bloques = [];
 
-  // La transferencia va primero: es el formato que el socio ya tiene probado.
   if(c.tipo === 'transferencia' || c.tipo === 'ambas'){
     bloques.push([
+      banco || '(sin banco)',
       c.cuenta || '(sin cuenta)',
       c.cedula || '(sin cédula)',
-      c.nombre || '(sin nombre)',
-      banco || '(sin banco)'
+      c.nombre || '(sin nombre)'
     ].join('\n'));
   }
   if(c.tipo === 'pago' || c.tipo === 'ambas'){
-    const lineas = ['Pago móvil:', c.cedula || '(sin cédula)', banco || '(sin banco)', c.telefono || '(sin teléfono)'];
+    const lineas = [banco || '(sin banco)', c.cedula || '(sin cédula)', c.telefono || '(sin teléfono)'];
     if(c.nombre) lineas.push(c.nombre);
     bloques.push(lineas.join('\n'));
   }
@@ -1530,13 +1694,16 @@ $('btnCopiar').addEventListener('click', () => {
     return;
   }
 
-  const nombre = $('nombreVendedor').value.trim();
+  const nombreVendedor = formatoTradicional($('nombreVendedor').value);
+  const nombreCliente = formatoTradicional($('nombreCliente').value);
   const bloqueBancoPegado = $('bancoTexto').value.trim();
 
   let bloqueBanco = '';
+  let camposBancarios = null;
   if(bloqueBancoPegado){
     // La comanda se arma con los campos revisados, no con un nuevo análisis del texto.
     const campos = leerCamposDeRevision();
+    camposBancarios = campos;
     const avisos = [];
     const faltan = problemasDeLosCampos();
     const sobran = sobrantesVisibles();
@@ -1549,49 +1716,125 @@ $('btnCopiar').addEventListener('click', () => {
     bloqueBanco = formatearComanda(campos);
   }
 
-  let lineaClp, lineaVes;
+  // Los montos: como número (para el libro de control) y como texto (para la comanda).
+  let valorClp, valorVes;
   if(modo === 'clp'){
-    lineaClp = Math.round(monto).toLocaleString('es-CL') + ' clp';
-    lineaVes = Math.round(monto*tasa).toLocaleString('es-VE') + ' bs';
+    valorClp = Math.round(monto);
+    valorVes = Math.round(monto * tasa);
   } else {
-    lineaVes = Math.round(monto).toLocaleString('es-VE') + ' bs';
-    lineaClp = Math.round(monto/tasa).toLocaleString('es-CL') + ' clp';
+    valorVes = Math.round(monto);
+    valorClp = Math.round(monto / tasa);
   }
+  const lineaClp = valorClp.toLocaleString('es-CL') + ' clp';
+  // El monto en bolívares con dos decimales: es la forma en que la app del banco lo entiende.
+  const lineaVes = valorVes.toLocaleString('es-VE') + ',00 bs';
 
-  // La tasa va SIN la fecha: la fecha era justo lo que la aplicación del banco tomaba como monto.
-  // El nombre de la vendedora va entre comillas, como se usa hoy.
+  // La tasa va con PUNTO a propósito: así no compite como candidato a monto.
   const etiqueta = tipoTasa === 'normal' ? 'Normal' : 'Especial';
-  const tasaTexto = ((tipoTasa === 'normal' ? $('tasaNormal').value : $('tasaEspecial').value).trim() || String(tasa))
-    .replace('.', ',');
-  const pie = 'Tasa ' + etiqueta + ' (' + tasaTexto + ')';
+  const tasaPunto = ((tipoTasa === 'normal' ? $('tasaNormal').value : $('tasaEspecial').value).trim() || String(tasa))
+    .replace(',', '.');
 
-  const texto = (bloqueBanco ? bloqueBanco + '\n\n' : '') +
-                lineaClp + '\n' + lineaVes + '\n\n\n' +
-                pie + (nombre ? '\n\n"' + nombre + '"' : '');
+  // Código único de esta comanda: va en el texto y viaja al libro de control.
+  const codigo = nuevoCodigo();
+
+  // FORMATO PROBADO CON EL SOCIO (la app del banco lo reconoce):
+  //   - El bloque de datos va PRIMERO y AFUERA de los corchetes.
+  //   - El monto en bolívares va AFUERA de los corchetes, con coma y dos decimales: es la única
+  //     forma en que el banco lo toma como monto.
+  //   - Todo lo demás va ENTRE CORCHETES (el banco lo ignora).
+  // No cambiar sin volver a probar con su app.
+  const extras = [
+    '[' + lineaClp + ']',
+    lineaVes,                       // sin corchetes: así viaja el monto
+    '[Tasa ' + etiqueta + ' ' + tasaPunto + ']',
+    '[Código: ' + codigo + ']'
+  ];
+  if(nombreCliente) extras.push('[Cliente: ' + nombreCliente + ']');
+  if(nombreVendedor) extras.push('[VENDEDOR    "' + nombreVendedor + '"]');
+
+  const texto = (bloqueBanco ? bloqueBanco + '\n\n' : '') + extras.join('\n');
 
   // Queda registrada como "última tasa usada", para poder avisar si mañana se escribe otra muy distinta.
   guardarUltimaTasa(tipoTasa, tasa);
 
-  // Siempre mostramos el texto, seleccionable a mano — esto funciona siempre, sin excepción.
+  // Una sola comanda: se muestra y se copia sola.
   $('comandaCaja').style.display = 'block';
   $('comandaTexto').value = texto;
-  $('comandaTexto').focus();
-  $('comandaTexto').select();
+  copiarTexto(texto, $('comandaTexto'), 'Comanda copiada');
 
-  // Intento adicional de copiado automático, silencioso — si funciona, mejor, pero el texto de arriba ya está disponible igual.
-  try{
-    if(navigator.clipboard && navigator.clipboard.writeText){
-      navigator.clipboard.writeText(texto).then(mostrarToast).catch(() => {});
-    } else if(document.execCommand){
-      document.execCommand('copy');
-      mostrarToast();
-    }
-  } catch(e){ /* no pasa nada, el texto ya quedo visible para copiar a mano */ }
+  // Envío silencioso al libro de control. No bloquea: la comanda ya está generada.
+  enviarAlLibro({
+    v: 1,
+    token: TOKEN_LIBRO,
+    codigo: codigo,
+    vendedora: nombreVendedor,
+    fecha: fechaISO(),
+    hora: horaActual(),
+    cliente: nombreCliente,
+    clp: valorClp,
+    ves: valorVes,
+    tasa: Number(tasa.toFixed(4)),
+    destinatario: {
+      nombre: camposBancarios ? (camposBancarios.nombre || '') : '',
+      cedula: camposBancarios ? (camposBancarios.cedula || '') : '',
+      banco: camposBancarios ? (camposBancarios.banco || '') : '',
+      cuenta: camposBancarios ? (camposBancarios.cuenta || '') : ''
+    },
+    nota: ''
+  });
+
+  // El cliente es de esta venta: se limpia para la siguiente.
+  $('nombreCliente').value = '';
 });
 
-function mostrarToast(){
+// Bloque mínimo que entiende la app del banco del socio (probado): el código de banco solo, sin
+// paréntesis, sin nombre de banco, y después los demás datos.
+
+// Copia un texto mostrando el resultado. Si el navegador no permite la copia moderna, usa el
+// método clásico y, si tampoco, avisa para copiar a mano.
+function copiarTexto(texto, campo, mensaje){
+  const aviso = $('avisoCopia');
+  if(aviso) aviso.hidden = true;
+
+  const copiarAMano = () => {
+    try{
+      campo.focus();
+      campo.select();
+      if(document.execCommand && document.execCommand('copy')){
+        mostrarToast(mensaje);
+        return true;
+      }
+    }catch(e){ /* sin soporte */ }
+    if(aviso){
+      aviso.textContent = 'No se pudo copiar solo. Mantené presionado el texto y elegí "Copiar".';
+      aviso.hidden = false;
+    }
+    return false;
+  };
+
+  let copia = null;
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      copia = navigator.clipboard.writeText(texto);
+    }
+  }catch(e){ copia = null; }
+
+  if(copia && typeof copia.then === 'function'){
+    copia.then(() => mostrarToast(mensaje)).catch(copiarAMano);
+  } else {
+    copiarAMano();
+  }
+}
+
+$('btnCopiarComanda').addEventListener('click', () => {
+  const valor = $('comandaTexto').value;
+  if(!valor) return;
+  copiarTexto(valor, $('comandaTexto'), 'Comanda copiada');
+});
+
+function mostrarToast(texto){
   const toast = $('toast');
-  toast.textContent = 'Copiado';
+  toast.textContent = texto || 'Copiado';
   toast.classList.add('mostrar');
   setTimeout(() => toast.classList.remove('mostrar'), 1800);
 }
