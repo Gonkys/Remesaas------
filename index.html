@@ -328,6 +328,8 @@
 
   <div class="calc-card">
 
+    <p class="aviso-campo" id="avisoGeneral" hidden></p>
+
     <div class="campo campo-nombre">
       <label>Vendedora</label>
       <div class="fila">
@@ -441,7 +443,7 @@
 const $ = (id) => document.getElementById(id);
 
 // Identificación de la copia: permite saber de un vistazo qué versión tiene cada vendedora.
-const VERSION = 'v27';
+const VERSION = 'v28';
 
 // --- Límites de seguridad de la tasa (los puede ajustar el dueño del negocio).
 // Un error de tipeo en la tasa cuesta dinero igual que un error en el monto: por eso, antes de
@@ -810,17 +812,9 @@ $('nombreCliente').addEventListener('change', () => {
   if(campo.value.trim()) campo.value = formatoTradicional(campo.value);
 });
 
-cargarTasas();
-cargarNombre();
-revisarVendedora();
-pintarEstadoTasa();
-calcular();
-
-// Si la app está publicada, se baja la tasa del día. Si no hay internet, sigue con lo que haya.
-intentarTasaPublicada();
-
-// Las comandas que no pudieron enviarse al libro se reintentan al abrir.
-setTimeout(reintentarPendientes, 4000);
+// El arranque va al FINAL del script (después de todas las declaraciones). Si se ejecuta antes de
+// que una constante esté inicializada, la app se queda muda: no calcula y los botones no responden.
+// Ese fue justamente el error de la v27 (con el nombre de la vendedora guardado).
 
 // Al volver a la app (por ejemplo, al día siguiente), si la tasa no es de hoy se reintenta.
 if(document.addEventListener){
@@ -1838,6 +1832,43 @@ function mostrarToast(texto){
   toast.classList.add('mostrar');
   setTimeout(() => toast.classList.remove('mostrar'), 1800);
 }
+
+// --- Arranque ------------------------------------------------------------------------
+// Va al final, después de todas las declaraciones y de todos los listeners.
+function avisarProblema(mensaje){
+  const caja = $('avisoGeneral');
+  if(!caja) return;
+  caja.textContent = mensaje;
+  caja.hidden = false;
+}
+
+// Si algo falla, que se vea en pantalla en lugar de quedar muda.
+window.addEventListener('error', (evento) => {
+  avisarProblema('Hubo un problema en la app (' + ((evento && evento.message) || 'error') +
+                 '). Recargá la página; si sigue, avisá.');
+});
+
+function arrancar(){
+  const pasos = [
+    ['tasas guardadas', cargarTasas],
+    ['nombre guardado', cargarNombre],
+    ['aviso de nombre', revisarVendedora],
+    ['estado de la tasa', pintarEstadoTasa],
+    ['cálculo inicial', calcular],
+    ['tasa publicada', intentarTasaPublicada],
+    ['comandas pendientes', () => setTimeout(reintentarPendientes, 4000)]
+  ];
+  for(const [nombre, paso] of pasos){
+    try{
+      paso();
+    }catch(e){
+      avisarProblema('No se pudo completar el arranque (' + nombre + '). Recargá la página; si sigue, avisá.');
+      try{ console.error('Fallo en el arranque: ' + nombre, e); }catch(_){ /* sin consola */ }
+    }
+  }
+}
+
+arrancar();
 </script>
 
 </body>
